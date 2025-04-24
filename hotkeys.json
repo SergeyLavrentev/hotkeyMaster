@@ -1,13 +1,31 @@
 [
   {
+    "type": "keyboard",
     "combo": {
       "mods": [
         "Alt"
       ],
-      "vk": 0,
-      "disp": "Alt + A"
+      "vk": 4,
+      "disp": "Alt + H"
     },
+    "gesture": "",
     "action": "open habr.com",
+    "scope": "app",
+    "app": "Google Chrome"
+  },
+  {
+    "type": "trackpad",
+    "combo": null,
+    "gesture": "Тап тремя пальцами",
+    "action": "hotkey:{\"mods\": [\"Cmd\"], \"vk\": 13, \"disp\": \"Cmd + W\"}",
+    "scope": "app",
+    "app": "Google Chrome"
+  },
+  {
+    "type": "trackpad",
+    "combo": null,
+    "gesture": "Тап четырьмя пальцами",
+    "action": "hotkey:{\"mods\": [\"Cmd\"], \"vk\": 17, \"disp\": \"Cmd + T\"}",
     "scope": "app",
     "app": "Google Chrome"
   }

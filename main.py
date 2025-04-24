@@ -14,7 +14,8 @@ from PIL import Image, ImageDraw
 import logging
 from ui import show_settings_window
 import Quartz
-
+import socket
+from trackpad_engine import TrackpadGestureEngine
 
 HOTKEYS_FILE = 'hotkeys.json'
 logging.basicConfig(level=logging.DEBUG, format='[%(asctime)s] %(levelname)s: %(message)s')
@@ -24,7 +25,12 @@ def load_hotkeys():
     try:
         with open(HOTKEYS_FILE, 'r', encoding='utf-8') as f:
             return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
+    except FileNotFoundError:
+        # Если файла нет — создаём пустой
+        with open(HOTKEYS_FILE, 'w', encoding='utf-8') as f:
+            f.write('[]')
+        return []
+    except json.JSONDecodeError:
         return []
 
 def save_hotkeys(hotkeys):
@@ -89,6 +95,33 @@ def run_action(action):
             subprocess.Popen(cmd, shell=True)
         except Exception as e:
             logger.error(f'Ошибка запуска команды: {e}')
+    elif action.startswith('hotkey:'):
+        import json
+        try:
+            combo = json.loads(action[7:])
+            mods = set(combo.get('mods', []))
+            vk = combo.get('vk')
+            # Эмуляция нажатия хоткея через Quartz
+            from Quartz import (
+                CGEventCreateKeyboardEvent, CGEventSetFlags,
+                CGEventPost, kCGHIDEventTap, kCGEventFlagMaskCommand,
+                kCGEventFlagMaskShift, kCGEventFlagMaskAlternate, kCGEventFlagMaskControl
+            )
+            flags = 0
+            if 'Cmd' in mods:
+                flags |= kCGEventFlagMaskCommand
+            if 'Shift' in mods:
+                flags |= kCGEventFlagMaskShift
+            if 'Alt' in mods:
+                flags |= kCGEventFlagMaskAlternate
+            if 'Ctrl' in mods:
+                flags |= kCGEventFlagMaskControl
+            for down in (True, False):
+                ev = CGEventCreateKeyboardEvent(None, vk, down)
+                CGEventSetFlags(ev, flags)
+                CGEventPost(kCGHIDEventTap, ev)
+        except Exception as e:
+            logger.error(f'Ошибка эмуляции хоткея: {e}')
     else:
         logger.debug(f'Неизвестное действие: {action}')
 
@@ -106,6 +139,10 @@ def register_hotkeys():
     hotkeys = load_hotkeys()
     logger.debug(f'Регистрируем хоткеи: {hotkeys}')
     for hk in hotkeys:
+        hk_type = hk.get('type', 'keyboard')
+        # Удалена заглушка для трекпад-жестов — теперь они обрабатываются в trackpad_engine
+        if hk_type == 'trackpad':
+            continue
         mods, vk = parse_combo(hk.get('combo', {}))
         action = hk.get('action', '')
         scope = hk.get('scope', 'global')
@@ -170,6 +207,10 @@ def open_settings_window():
 
 def hotkey_thread_func():
     last_mtime = None
+    # Если файла нет — создаём пустой
+    if not os.path.exists(HOTKEYS_FILE):
+        with open(HOTKEYS_FILE, 'w', encoding='utf-8') as f:
+            f.write('[]')
     while True:
         try:
             mtime = os.path.getmtime(HOTKEYS_FILE)
@@ -184,14 +225,13 @@ def hotkey_thread_func():
 tray_delegate = None  # глобальная переменная для хранения делегата
 
 def create_tray():
-    def on_settings(icon, item):
+    def on_settings(icon, item=None):
         logger.debug('Открытие окна настроек')
         open_settings_window()
-    def on_quit(icon, item):
+    def on_quit(icon, item=None):
         logger.debug('Выход через меню трея')
         icon.stop()
         os._exit(0)
-    # Более заметная иконка: белый круг с чёрной рамкой и символом
     size = 64
     image = Image.new('RGBA', (size, size), (255, 255, 255, 255))
     d = ImageDraw.Draw(image)
@@ -237,6 +277,24 @@ def show_accessibility_warning():
         import subprocess
         subprocess.Popen(['open', 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility'])
 
+def is_another_instance_running():
+    import socket
+    import atexit
+    LOCK_PATH = '/tmp/hotkeymaster.lock'
+    # Удаляем lock-файл, если он остался (например, после аварийного завершения)
+    try:
+        if os.path.exists(LOCK_PATH):
+            os.unlink(LOCK_PATH)
+    except Exception:
+        pass
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+    try:
+        sock.bind(LOCK_PATH)
+        atexit.register(lambda: os.path.exists(LOCK_PATH) and os.unlink(LOCK_PATH))
+        return False
+    except OSError:
+        return True
+
 if __name__ == '__main__':
     if '--settings' in sys.argv:
         from PyQt5 import QtWidgets, QtCore
@@ -246,9 +304,20 @@ if __name__ == '__main__':
         show_settings_window(load_hotkeys, save_hotkeys)
         sys.exit(0)
     else:
+        if is_another_instance_running():
+            print('HotkeyMaster уже запущен.')
+            sys.exit(0)
         if not check_accessibility():
             show_accessibility_warning()
             sys.exit(1)
+        # Трекпад-движок: запуск в отдельном потоке
+        def get_gesture_actions():
+            return load_hotkeys()
+        trackpad_engine = TrackpadGestureEngine(get_gesture_actions, run_action, get_active_app_name)
+        try:
+            trackpad_engine.start()
+        except Exception as e:
+            logger.error(f'Ошибка запуска трекпад-движка: {e}')
         # Трей в главном потоке, хоткей-листенер — в отдельном
         hk_thread = threading.Thread(target=hotkey_thread_func, daemon=True)
         hk_thread.start()
