@@ -4,10 +4,10 @@
       "mods": [
         "Alt"
       ],
-      "vk": 16,
-      "disp": "Alt + Y"
+      "vk": 0,
+      "disp": "Alt + A"
     },
-    "action": "run code",
+    "action": "open habr.com",
     "scope": "app",
     "app": "Google Chrome"
   }

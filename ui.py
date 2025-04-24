@@ -91,15 +91,18 @@ class SettingsWindow(QtWidgets.QWidget):
             self.hotkey_list.addItem(f"{disp} — {hk.get('action', '')} [{scope_disp}]")
         add_btn = QtWidgets.QPushButton('Добавить хоткей')
         del_btn = QtWidgets.QPushButton('Удалить выбранный')
-        close_btn = QtWidgets.QPushButton('Закрыть')
+        edit_btn = QtWidgets.QPushButton('Редактировать выбранный')
         layout.addWidget(label)
         layout.addWidget(self.hotkey_list)
         layout.addWidget(add_btn)
         layout.addWidget(del_btn)
+        layout.addWidget(edit_btn)
+        close_btn = QtWidgets.QPushButton('Закрыть')
         layout.addWidget(close_btn)
         self.setLayout(layout)
         add_btn.clicked.connect(self.on_add)
         del_btn.clicked.connect(self.on_del)
+        edit_btn.clicked.connect(self.on_edit)
         close_btn.clicked.connect(self.close)
 
     def on_add(self):
@@ -151,6 +154,83 @@ class SettingsWindow(QtWidgets.QWidget):
                 self.save_hotkeys(hotkeys)
                 scope_disp = 'Глобальный' if scope == 'global' else f'Только для: {app}'
                 self.hotkey_list.addItem(f"{combo['disp']} — {action} [{scope_disp}]")
+                try:
+                    import main
+                    main.register_hotkeys()
+                except Exception as e:
+                    print(f'Ошибка перерегистрации хоткеев: {e}')
+
+    def on_edit(self):
+        row = self.hotkey_list.currentRow()
+        if row < 0:
+            return
+        hotkeys = self.load_hotkeys()
+        if row >= len(hotkeys):
+            return
+        hk = hotkeys[row]
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle('Редактировать хоткей')
+        vbox = QtWidgets.QVBoxLayout()
+        hotkey_input = HotkeyInput()
+        # Заполнить текущую комбинацию
+        if isinstance(hk.get('combo'), dict):
+            hotkey_input.setText(hk['combo'].get('disp', ''))
+            hotkey_input._mods = set(hk['combo'].get('mods', []))
+            hotkey_input._vk = hk['combo'].get('vk')
+        vbox.addWidget(QtWidgets.QLabel('Комбинация:'))
+        vbox.addWidget(hotkey_input)
+        # Тип действия
+        action_type = QtWidgets.QComboBox()
+        action_type.addItems(['Открыть сайт', 'Запустить программу/команду'])
+        is_open = hk.get('action', '').startswith('open ')
+        action_type.setCurrentIndex(0 if is_open else 1)
+        vbox.addWidget(QtWidgets.QLabel('Тип действия:'))
+        vbox.addWidget(action_type)
+        action_input = QtWidgets.QLineEdit()
+        if is_open:
+            action_input.setText(hk.get('action', '')[5:].strip())
+        else:
+            action_input.setText(hk.get('action', '')[4:].strip())
+        vbox.addWidget(QtWidgets.QLabel('URL или команда:'))
+        vbox.addWidget(action_input)
+        # Область действия
+        scope_type = QtWidgets.QComboBox()
+        scope_type.addItems(['Глобальный', 'Только для приложения'])
+        scope_type.setCurrentIndex(0 if hk.get('scope', 'global') == 'global' else 1)
+        vbox.addWidget(QtWidgets.QLabel('Где работает хоткей:'))
+        vbox.addWidget(scope_type)
+        app_combo = QtWidgets.QComboBox()
+        app_combo.addItems([''] + get_applications())
+        app_combo.setEnabled(scope_type.currentIndex() == 1)
+        if hk.get('app'):
+            idx = app_combo.findText(hk.get('app'))
+            if idx >= 0:
+                app_combo.setCurrentIndex(idx)
+        vbox.addWidget(app_combo)
+        def on_scope_change(idx):
+            app_combo.setEnabled(idx == 1)
+        scope_type.currentIndexChanged.connect(on_scope_change)
+        btns = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
+        vbox.addWidget(btns)
+        dlg.setLayout(vbox)
+        btns.accepted.connect(dlg.accept)
+        btns.rejected.connect(dlg.reject)
+        if dlg.exec_() == QtWidgets.QDialog.Accepted:
+            combo = hotkey_input.get_combo()
+            action_val = action_input.text().strip()
+            action = ''
+            if action_type.currentIndex() == 0:
+                action = f'open {action_val}'
+            else:
+                action = f'run {action_val}'
+            scope = 'global' if scope_type.currentIndex() == 0 else 'app'
+            app = app_combo.currentText() if scope == 'app' else ''
+            if combo and action:
+                hotkeys[row] = {'combo': combo, 'action': action, 'scope': scope, 'app': app}
+                self.save_hotkeys(hotkeys)
+                # Обновить отображение
+                scope_disp = 'Глобальный' if scope == 'global' else f'Только для: {app}'
+                self.hotkey_list.item(row).setText(f"{combo['disp']} — {action} [{scope_disp}]")
                 try:
                     import main
                     main.register_hotkeys()
