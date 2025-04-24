@@ -203,7 +203,12 @@ class TrayDelegate(NSObject):
         return True
 
 def open_settings_window():
-    subprocess.Popen([sys.executable, os.path.abspath(__file__), '--settings'])
+    from PyQt5 import QtWidgets
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    try:
+        show_settings_window(load_hotkeys, save_hotkeys)
+    except Exception as e:
+        logger.error(f'Ошибка открытия окна настроек: {e}')
 
 def hotkey_thread_func():
     last_mtime = None
@@ -224,6 +229,15 @@ def hotkey_thread_func():
 
 tray_delegate = None  # глобальная переменная для хранения делегата
 
+def resource_path(rel_path):
+    import sys, os
+    if getattr(sys, 'frozen', False):
+        exec_dir = os.path.dirname(sys.executable)
+        resources_icons = os.path.abspath(os.path.join(exec_dir, '..', 'Resources', 'icons', rel_path))
+        if os.path.exists(resources_icons):
+            return resources_icons
+    return os.path.join(os.path.abspath(os.path.dirname(__file__)), 'icons', rel_path)
+
 def create_tray():
     def on_settings(icon, item=None):
         logger.debug('Открытие окна настроек')
@@ -232,11 +246,9 @@ def create_tray():
         logger.debug('Выход через меню трея')
         icon.stop()
         os._exit(0)
-    size = 64
-    image = Image.new('RGBA', (size, size), (255, 255, 255, 255))
-    d = ImageDraw.Draw(image)
-    d.ellipse((0, 0, size-1, size-1), fill=(255,255,255,255), outline=(0,0,0,255), width=3)
-    d.text((size//4, size//4), '⌨️', fill=(0, 0, 0, 255))
+    # Используем PNG-иконку для трея
+    icon_path = resource_path('tray_icon.png')
+    image = Image.open(icon_path)
     menu = pystray.Menu(
         pystray.MenuItem('Настройки', on_settings),
         pystray.MenuItem('Выход', on_quit)
@@ -266,7 +278,7 @@ def show_accessibility_warning():
     msg.setText(
         "Для работы глобальных хоткеев нужно разрешить доступ к управлению компьютером.\n\n"
         "1. Откройте: Системные настройки → Конфиденциальность и безопасность → Универсальный доступ\n"
-        "2. Добавьте Terminal или Python и поставьте галочку.\n\n"
+        "2. Добавьте HotkeyMaster и поставьте галочку.\n\n"
         "После этого перезапустите программу."
     )
     btn = msg.addButton("Открыть настройки", QtWidgets.QMessageBox.AcceptRole)
@@ -296,8 +308,9 @@ def is_another_instance_running():
         return True
 
 if __name__ == '__main__':
+    from PyQt5 import QtWidgets
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     if '--settings' in sys.argv:
-        from PyQt5 import QtWidgets, QtCore
         if not check_accessibility():
             show_accessibility_warning()
             sys.exit(1)

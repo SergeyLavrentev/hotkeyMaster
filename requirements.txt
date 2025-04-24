@@ -1,4 +1,5 @@
-pyobjc
 PyQt5
 pynput
 pystray
+pillow
+pyobjc
