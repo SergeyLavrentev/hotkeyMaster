@@ -1,0 +1,19 @@
+# Ignore logs directory
+logs/
+dist
+build
+.eggs
+
+# Ignore all .log files
+*.log
+
+movie_data_cache.json
+feeds.json
+settings.json
+read_articles.json
+group_settings.json
+# Ignore virtual environments
+venv/
+ENV/
+env/
+__pycache__/

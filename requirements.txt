@@ -1,0 +1,4 @@
+pyobjc
+PyQt5
+pynput
+pystray

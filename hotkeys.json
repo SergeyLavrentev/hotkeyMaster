@@ -1,0 +1,14 @@
+[
+  {
+    "combo": {
+      "mods": [
+        "Alt"
+      ],
+      "vk": 16,
+      "disp": "Alt + Y"
+    },
+    "action": "run code",
+    "scope": "app",
+    "app": "Google Chrome"
+  }
+]
