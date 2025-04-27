@@ -138,10 +138,10 @@ class SettingsWindow(QtWidgets.QDialog):
         self.type_list.addItems(['Клавиатура', 'Трекпад'])
         # Справа — список хоткеев выбранного типа
         self.hotkey_list = QtWidgets.QListWidget()
-        # --- Компактный layout: только три колонки ---
-        self.type_list.setFixedWidth(140)
+        self.hotkey_list.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
         self.hotkey_list.setMinimumWidth(320)
         self.hotkey_list.setWordWrap(True)
+        self.hotkey_list.setIconSize(QtCore.QSize(20, 20))
         self.details_scroll = QtWidgets.QScrollArea()
         self.details_scroll.setWidgetResizable(True)
         self.details_scroll.setMinimumWidth(340)
@@ -179,33 +179,34 @@ class SettingsWindow(QtWidgets.QDialog):
         else:
             filtered = [hk for hk in hotkeys if hk.get('type') == 'trackpad']
         self._filtered = filtered
-        for hk in filtered:
+        for i, hk in enumerate(filtered):
             hk_type = hk.get('type', 'keyboard')
             disp = hk.get('combo', {}).get('disp') if hk_type == 'keyboard' else hk.get('gesture', '')
             action = hk.get('action', '')
             scope = hk.get('scope', 'global')
             app = hk.get('app', '')
             scope_disp = 'Глобальный' if scope == 'global' else f'Только для: {app}'
-
-            # --- Изменение здесь ---
-            action_disp = action # По умолчанию показываем как есть
+            action_disp = action
             if hk_type == 'trackpad' and action.startswith('hotkey:'):
                 try:
                     import json
                     combo_data = json.loads(action[7:])
                     action_disp = f"Нажать: {combo_data.get('disp', 'Неизвестный хоткей')}"
                 except Exception:
-                    action_disp = "Ошибка парсинга хоткея" # Обработка ошибки
+                    action_disp = "Ошибка парсинга хоткея"
             elif action.startswith('open '):
-                 action_disp = f"Открыть: {action[5:].strip()}"
+                action_disp = f"Открыть: {action[5:].strip()}"
             elif action.startswith('run '):
-                 action_disp = f"Запустить: {action[4:].strip()}"
-            # --- Конец изменения ---
-
-            text = f"{disp}\n{action_disp}\n{scope_disp}" # Используем action_disp и настоящие переносы строк
-
+                action_disp = f"Запустить: {action[4:].strip()}"
+            text = f"{disp}\n{action_disp}\n{scope_disp}"
             item = QtWidgets.QListWidgetItem(text)
-            item.setSizeHint(QtCore.QSize(item.sizeHint().width(), 60)) # Оставим увеличенную высоту
+            item.setSizeHint(QtCore.QSize(item.sizeHint().width(), 60))
+            # --- Чекбокс сбоку ---
+            item.setFlags(item.flags() | QtCore.Qt.ItemIsUserCheckable)
+            item.setCheckState(QtCore.Qt.Checked if hk.get('enabled', True) else QtCore.Qt.Unchecked)
+            # --- Цвет для отключённых ---
+            if not hk.get('enabled', True):
+                item.setForeground(QtGui.QBrush(QtGui.QColor('gray')))
             self.hotkey_list.addItem(item)
         # Показываем настройки первого хоткея, если есть
         if self.hotkey_list.count() > 0:
@@ -220,6 +221,25 @@ class SettingsWindow(QtWidgets.QDialog):
         self.hotkey_list.currentRowChanged.connect(self.show_hotkey_details)
         # Показываем настройки для выбранного (или первого) хоткея
         self.show_hotkey_details(self.hotkey_list.currentRow())
+        self.hotkey_list.itemChanged.connect(self.on_hotkey_check_changed)
+
+    def on_hotkey_check_changed(self, item):
+        idx = self.hotkey_list.row(item)
+        if idx < 0 or idx >= len(self._filtered):
+            return
+        hk = self._filtered[idx]
+        hotkeys = self.load_hotkeys()
+        # Найти и обновить в общем списке
+        for i, h in enumerate(hotkeys):
+            if h == hk:
+                hotkeys[i]['enabled'] = (item.checkState() == QtCore.Qt.Checked)
+                break
+        self.save_hotkeys(hotkeys)
+        # Обновить цвет
+        if item.checkState() == QtCore.Qt.Checked:
+            item.setForeground(QtGui.QBrush(QtGui.QColor('black')))
+        else:
+            item.setForeground(QtGui.QBrush(QtGui.QColor('gray')))
 
     def show_hotkey_details(self, row):
         # Удаляем старый виджет настроек, если был
@@ -236,6 +256,7 @@ class SettingsWindow(QtWidgets.QDialog):
         group = QtWidgets.QGroupBox('Параметры')
         grid = QtWidgets.QGridLayout()
         row_idx = 0
+
         # --- Редактируемые поля ---
         if hk.get('type', 'keyboard') == 'keyboard':
             combo_input = HotkeyInput(details)
@@ -424,6 +445,9 @@ class SettingsWindow(QtWidgets.QDialog):
                         action = 'hotkey:' + json.dumps(action_combo, ensure_ascii=False)
 
                 new_hk_data['action'] = action
+
+                # --- ДОБАВЛЕНО: сохраняем состояние enabled ---
+                new_hk_data['enabled'] = enabled_cb.isChecked()
 
                 # Обновляем хоткей в списке только если что-то изменилось
                 if hotkeys[current_hk_index] != new_hk_data:
