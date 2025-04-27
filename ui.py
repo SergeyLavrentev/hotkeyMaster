@@ -4,12 +4,25 @@ import os
 
 # Сопоставление Qt keycode → pynput vk для букв и цифр (macOS)
 def qtkey_to_pynput_vk(qt_vk):
-    # Буквы (A=0x41=65, ... Z=0x5A=90), pynput vk: A=0, B=11, C=8, D=2, E=14, F=3, G=5, H=4, I=34, J=38, K=40, L=37, M=46, N=45, O=31, P=35, Q=12, R=15, S=1, T=17, U=32, V=9, W=13, X=7, Y=16, Z=6
+    # Буквы A-Z
     qt_to_pynput = {
         65: 0, 66: 11, 67: 8, 68: 2, 69: 14, 70: 3, 71: 5, 72: 4, 73: 34, 74: 38, 75: 40, 76: 37, 77: 46, 78: 45, 79: 31, 80: 35, 81: 12, 82: 15, 83: 1, 84: 17, 85: 32, 86: 9, 87: 13, 88: 7, 89: 16, 90: 6,
-        48: 29, 49: 18, 50: 19, 51: 20, 52: 21, 53: 23, 54: 22, 55: 26, 56: 28, 57: 25 # 0-9
+        # Цифры 0-9
+        48: 29, 49: 18, 50: 19, 51: 20, 52: 21, 53: 23, 54: 22, 55: 26, 56: 28, 57: 25,
+        # F-клавиши (Qt -> macOS VK)
+        QtCore.Qt.Key_F1: 122, QtCore.Qt.Key_F2: 120, QtCore.Qt.Key_F3: 99, QtCore.Qt.Key_F4: 118,
+        QtCore.Qt.Key_F5: 96, QtCore.Qt.Key_F6: 97, QtCore.Qt.Key_F7: 98, QtCore.Qt.Key_F8: 100,
+        QtCore.Qt.Key_F9: 101, QtCore.Qt.Key_F10: 109, QtCore.Qt.Key_F11: 103, QtCore.Qt.Key_F12: 111,
+        # Добавим основные спец. клавиши, если они еще не покрыты
+        QtCore.Qt.Key_Return: 36, QtCore.Qt.Key_Enter: 76, # Enter на основной и цифровой клавиатуре
+        QtCore.Qt.Key_Tab: 48,
+        QtCore.Qt.Key_Escape: 53,
+        QtCore.Qt.Key_Space: 49,
+        QtCore.Qt.Key_Backspace: 51,
+        QtCore.Qt.Key_Delete: 117,
+        QtCore.Qt.Key_Left: 123, QtCore.Qt.Key_Right: 124, QtCore.Qt.Key_Up: 126, QtCore.Qt.Key_Down: 125,
     }
-    return qt_to_pynput.get(qt_vk, qt_vk)
+    return qt_to_pynput.get(qt_vk)
 
 def get_applications():
     apps = set()
@@ -33,36 +46,65 @@ class HotkeyInput(QtWidgets.QLineEdit):
     def keyPressEvent(self, event):
         mods = set()
         qt_mods = event.modifiers()
-        # Исправление для macOS: меняем местами Cmd и Ctrl
-        if sys.platform == "darwin":
-            if qt_mods & QtCore.Qt.ControlModifier:
-                mods.add('Cmd')
-            if qt_mods & QtCore.Qt.MetaModifier:
-                mods.add('Ctrl')
-        else:
-            if qt_mods & QtCore.Qt.ControlModifier:
-                mods.add('Ctrl')
-            if qt_mods & QtCore.Qt.MetaModifier:
-                mods.add('Cmd')
-        if qt_mods & QtCore.Qt.AltModifier:
-            mods.add('Alt')
-        if qt_mods & QtCore.Qt.ShiftModifier:
-            mods.add('Shift')
         qt_vk = event.key()
+
+        modifier_keys = {
+            QtCore.Qt.Key_Control, QtCore.Qt.Key_Shift, QtCore.Qt.Key_Alt,
+            QtCore.Qt.Key_Meta, QtCore.Qt.Key_CapsLock,
+            QtCore.Qt.Key_AltGr, QtCore.Qt.Key_Super_L, QtCore.Qt.Key_Super_R,
+            QtCore.Qt.Key_Hyper_L, QtCore.Qt.Key_Hyper_R
+        }
+
+        # --- ИЗМЕНЕНИЕ: Игнорируем, если нажата только клавиша-модификатор ---
+        if qt_vk in modifier_keys:
+            if sys.platform == "darwin":
+                if qt_mods & QtCore.Qt.ControlModifier: mods.add('Cmd')
+                if qt_mods & QtCore.Qt.MetaModifier: mods.add('Ctrl')
+            else:
+                if qt_mods & QtCore.Qt.ControlModifier: mods.add('Ctrl')
+                if qt_mods & QtCore.Qt.MetaModifier: mods.add('Cmd')
+            if qt_mods & QtCore.Qt.AltModifier: mods.add('Alt')
+            if qt_mods & QtCore.Qt.ShiftModifier: mods.add('Shift')
+            self.setText(' + '.join(sorted(mods)) + ' + ...')
+            self._mods = mods # Сохраняем модификаторы
+            self._vk = None # Сбрасываем vk
+            self._combo_str = '' # Сбрасываем строку
+            return # Не обрабатываем дальше
+        # --- КОНЕЦ ИЗМЕНЕНИЯ ---
+
+        # Определяем модификаторы (как и раньше)
+        if sys.platform == "darwin":
+            if qt_mods & QtCore.Qt.ControlModifier: mods.add('Cmd')
+            if qt_mods & QtCore.Qt.MetaModifier: mods.add('Ctrl')
+        else:
+            if qt_mods & QtCore.Qt.ControlModifier: mods.add('Ctrl')
+            if qt_mods & QtCore.Qt.MetaModifier: mods.add('Cmd')
+        if qt_mods & QtCore.Qt.AltModifier: mods.add('Alt')
+        if qt_mods & QtCore.Qt.ShiftModifier: mods.add('Shift')
+
+        # Получаем vk для pynput
         vk = qtkey_to_pynput_vk(qt_vk)
-        # Для отображения
+
+        # Если vk не найден (None), то комбинация невалидна
+        if vk is None:
+             self.setText("<Неподдерживаемая клавиша>")
+             self._mods = mods # Сохраняем модификаторы
+             self._vk = None    # Убедимся, что vk это None
+             self._combo_str = '' # Сбрасываем строку
+             return
+
+        # Для отображения (как и раньше, но используем vk для F-клавиш)
         key_map = {
-            QtCore.Qt.Key_Return: 'Enter',
-            QtCore.Qt.Key_Enter: 'Enter',
-            QtCore.Qt.Key_Tab: 'Tab',
-            QtCore.Qt.Key_Escape: 'Esc',
-            QtCore.Qt.Key_Space: 'Space',
-            QtCore.Qt.Key_Backspace: 'Backspace',
-            QtCore.Qt.Key_Delete: 'Del',
-            QtCore.Qt.Key_Left: 'Left',
-            QtCore.Qt.Key_Right: 'Right',
-            QtCore.Qt.Key_Up: 'Up',
+            QtCore.Qt.Key_Return: 'Enter', QtCore.Qt.Key_Enter: 'Enter',
+            QtCore.Qt.Key_Tab: 'Tab', QtCore.Qt.Key_Escape: 'Esc',
+            QtCore.Qt.Key_Space: 'Space', QtCore.Qt.Key_Backspace: 'Backspace',
+            QtCore.Qt.Key_Delete: 'Del', QtCore.Qt.Key_Left: 'Left',
+            QtCore.Qt.Key_Right: 'Right', QtCore.Qt.Key_Up: 'Up',
             QtCore.Qt.Key_Down: 'Down',
+            QtCore.Qt.Key_F1: 'F1', QtCore.Qt.Key_F2: 'F2', QtCore.Qt.Key_F3: 'F3',
+            QtCore.Qt.Key_F4: 'F4', QtCore.Qt.Key_F5: 'F5', QtCore.Qt.Key_F6: 'F6',
+            QtCore.Qt.Key_F7: 'F7', QtCore.Qt.Key_F8: 'F8', QtCore.Qt.Key_F9: 'F9',
+            QtCore.Qt.Key_F10: 'F10', QtCore.Qt.Key_F11: 'F11', QtCore.Qt.Key_F12: 'F12',
         }
         if qt_vk in key_map:
             key_name = key_map[qt_vk]
@@ -71,17 +113,19 @@ class HotkeyInput(QtWidgets.QLineEdit):
         elif QtCore.Qt.Key_A <= qt_vk <= QtCore.Qt.Key_Z:
             key_name = f'{chr(qt_vk)}'
         else:
-            key_name = f'VK_{qt_vk}'
+            key_name = f'VK_{vk}' # Отображаем pynput vk
+
         mods_disp = ' + '.join(sorted(mods))
         self._mods = mods
-        self._vk = vk
+        self._vk = vk # Сохраняем pynput vk
         self._combo_str = (mods_disp + (' + ' if mods_disp else '') + key_name).strip()
         self.setText(self._combo_str)
 
     def get_combo(self):
-        return {'mods': sorted(self._mods), 'vk': self._vk, 'disp': self._combo_str}
+        # Всегда возвращаем словарь, но vk может быть None
+        return {'mods': sorted(list(self._mods)), 'vk': self._vk, 'disp': self._combo_str}
 
-class SettingsWindow(QtWidgets.QWidget):
+class SettingsWindow(QtWidgets.QDialog):
     def __init__(self, load_hotkeys, save_hotkeys):
         super().__init__()
         self.setWindowTitle('HotkeyMaster — Настройки')
@@ -136,14 +180,32 @@ class SettingsWindow(QtWidgets.QWidget):
             filtered = [hk for hk in hotkeys if hk.get('type') == 'trackpad']
         self._filtered = filtered
         for hk in filtered:
-            disp = hk.get('combo', {}).get('disp') if hk.get('type', 'keyboard') == 'keyboard' else hk.get('gesture', '')
+            hk_type = hk.get('type', 'keyboard')
+            disp = hk.get('combo', {}).get('disp') if hk_type == 'keyboard' else hk.get('gesture', '')
             action = hk.get('action', '')
             scope = hk.get('scope', 'global')
             app = hk.get('app', '')
             scope_disp = 'Глобальный' if scope == 'global' else f'Только для: {app}'
-            text = f"{disp}\n{action}\n{scope_disp}"
+
+            # --- Изменение здесь ---
+            action_disp = action # По умолчанию показываем как есть
+            if hk_type == 'trackpad' and action.startswith('hotkey:'):
+                try:
+                    import json
+                    combo_data = json.loads(action[7:])
+                    action_disp = f"Нажать: {combo_data.get('disp', 'Неизвестный хоткей')}"
+                except Exception:
+                    action_disp = "Ошибка парсинга хоткея" # Обработка ошибки
+            elif action.startswith('open '):
+                 action_disp = f"Открыть: {action[5:].strip()}"
+            elif action.startswith('run '):
+                 action_disp = f"Запустить: {action[4:].strip()}"
+            # --- Конец изменения ---
+
+            text = f"{disp}\n{action_disp}\n{scope_disp}" # Используем action_disp и настоящие переносы строк
+
             item = QtWidgets.QListWidgetItem(text)
-            item.setSizeHint(QtCore.QSize(item.sizeHint().width(), 48))
+            item.setSizeHint(QtCore.QSize(item.sizeHint().width(), 60)) # Оставим увеличенную высоту
             self.hotkey_list.addItem(item)
         # Показываем настройки первого хоткея, если есть
         if self.hotkey_list.count() > 0:
@@ -184,7 +246,32 @@ class SettingsWindow(QtWidgets.QWidget):
             grid.addWidget(QtWidgets.QLabel('Комбинация:'), row_idx, 0)
             grid.addWidget(combo_input, row_idx, 1)
             row_idx += 1
-        else:
+
+            # --- ДОБАВЛЕНО: Выбор области действия для клавиатуры ---
+            scope_type = QtWidgets.QComboBox(details)
+            scope_type.addItems(['Глобальный', 'Только для приложения'])
+            scope_type.setCurrentIndex(0 if hk.get('scope', 'global') == 'global' else 1)
+            grid.addWidget(QtWidgets.QLabel('Где работает хоткей:'), row_idx, 0)
+            grid.addWidget(scope_type, row_idx, 1)
+            row_idx += 1
+
+            app_combo = QtWidgets.QComboBox(details)
+            app_combo.addItems([''] + get_applications())
+            app_combo.setEnabled(scope_type.currentIndex() == 1)
+            if hk.get('app'):
+                idx = app_combo.findText(hk.get('app'))
+                if idx >= 0:
+                    app_combo.setCurrentIndex(idx)
+            grid.addWidget(QtWidgets.QLabel('Приложение:'), row_idx, 0)
+            grid.addWidget(app_combo, row_idx, 1)
+            row_idx += 1
+
+            def on_scope_change(idx):
+                app_combo.setEnabled(idx == 1)
+            scope_type.currentIndexChanged.connect(on_scope_change)
+            # --- КОНЕЦ ДОБАВЛЕНИЯ ---
+
+        else: # trackpad
             gesture_combo = QtWidgets.QComboBox(details)
             gesture_combo.addItems([
                 'Тап одним пальцем',
@@ -215,9 +302,11 @@ class SettingsWindow(QtWidgets.QWidget):
             grid.addWidget(QtWidgets.QLabel('Приложение:'), row_idx, 0)
             grid.addWidget(app_combo, row_idx, 1)
             row_idx += 1
+
             def on_scope_change(idx):
                 app_combo.setEnabled(idx == 1)
             scope_type.currentIndexChanged.connect(on_scope_change)
+
         action_type = QtWidgets.QComboBox(details)
         action_type.addItems(['Открыть сайт', 'Запустить программу/команду', 'Нажать хоткей'])
         is_open = hk.get('action', '').startswith('open ')
@@ -261,52 +350,117 @@ class SettingsWindow(QtWidgets.QWidget):
         action_type.currentIndexChanged.connect(set_action_field)
         def save_changes():
             hotkeys = self.load_hotkeys()
+            current_hk_index = -1
             for i, h in enumerate(hotkeys):
-                if h == hk:
-                    if hk.get('type', 'keyboard') == 'keyboard':
-                        combo = combo_input.get_combo()
-                        gesture = ''
-                        scope = 'global'
-                        app = ''
-                    else:
-                        combo = None
-                        gesture = gesture_combo.currentText()
-                        scope = 'global' if scope_type.currentIndex() == 0 else 'app'
-                        app = app_combo.currentText() if scope == 'app' else ''
-                    if action_type.currentIndex() == 0:
-                        action = f'open {action_input.text().strip()}'
-                    elif action_type.currentIndex() == 1:
-                        action = f'run {action_input.text().strip()}'
-                    else:
-                        import json
-                        combo_val = hotkey_input.get_combo()
-                        action = 'hotkey:' + json.dumps(combo_val, ensure_ascii=False)
-                    hotkeys[i] = {
-                        'type': hk.get('type'),
+                 if h == hk:
+                     current_hk_index = i
+                     break
+
+            if current_hk_index == -1:
+                print("Ошибка: Не удалось найти редактируемый хоткей в списке.")
+                return # Не нашли хоткей, ничего не делаем
+
+            original_hk = hotkeys[current_hk_index] # Сохраняем оригинал для отката
+
+            try:
+                new_hk_data = {}
+                action = original_hk.get('action', '') # Действие по умолчанию
+
+                if hk.get('type', 'keyboard') == 'keyboard':
+                    combo = combo_input.get_combo()
+                    # --- ПРОВЕРКА VK ПЕРЕД СОХРАНЕНИЕМ ---
+                    if combo.get('vk') is None:
+                        print("Предупреждение: Попытка сохранить невалидную комбинацию клавиш. Изменения комбинации не будут сохранены.")
+                        combo = original_hk.get('combo') # Возвращаем старую комбинацию
+                        if combo is None or combo.get('vk') is None: # Если и старой не было или она невалидна
+                             print("Ошибка: Невалидная новая комбинация и нет/невалидна старая. Сохранение прервано.")
+                             # Можно показать сообщение пользователю
+                             # QtWidgets.QMessageBox.warning(self, "Ошибка", "Невозможно сохранить невалидную комбинацию клавиш.")
+                             return # Прерываем сохранение
+                    # --- КОНЕЦ ПРОВЕРКИ ---
+
+                    # --- ИЗМЕНЕНО: Считываем scope/app из UI ---
+                    scope = 'global' if scope_type.currentIndex() == 0 else 'app'
+                    app = app_combo.currentText() if scope == 'app' else ''
+                    # --- КОНЕЦ ИЗМЕНЕНИЯ ---
+
+                    new_hk_data = {
+                        'type': 'keyboard',
                         'combo': combo,
+                        'gesture': '',
+                        'scope': scope, # Используем значения из UI
+                        'app': app      # Используем значения из UI
+                    }
+                else: # trackpad
+                    gesture = gesture_combo.currentText()
+                    scope = 'global' if scope_type.currentIndex() == 0 else 'app'
+                    app = app_combo.currentText() if scope == 'app' else ''
+                    new_hk_data = {
+                        'type': 'trackpad',
+                        'combo': None,
                         'gesture': gesture,
-                        'action': action,
                         'scope': scope,
                         'app': app
                     }
-                    break
-            self.save_hotkeys(hotkeys)
-            try:
-                import main
-                main.register_hotkeys()
-            except Exception as e:
-                print(f'Ошибка перерегистрации хоткеев: {e}')
-            self.update_hotkey_list(self.type_list.currentRow())
-            self.hotkey_list.setCurrentRow(row)
+
+                # Обновляем действие отдельно
+                action_idx = action_type.currentIndex()
+                if action_idx == 0: # Открыть сайт
+                    action = f'open {action_input.text().strip()}'
+                elif action_idx == 1: # Запустить команду
+                    action = f'run {action_input.text().strip()}'
+                else: # Нажать хоткей
+                    action_combo = hotkey_input.get_combo()
+                    # --- ПРОВЕРКА VK ДЛЯ ДЕЙСТВИЯ-ХОТКЕЯ ---
+                    if action_combo.get('vk') is None:
+                         print("Предупреждение: Попытка сохранить невалидную комбинацию для действия 'Нажать хоткей'. Изменения действия не будут сохранены.")
+                         action = original_hk.get('action', '') # Возвращаем старое действие
+                         # Можно показать сообщение пользователю
+                         # QtWidgets.QMessageBox.warning(self, "Ошибка", "Невозможно сохранить невалидную комбинацию для действия 'Нажать хоткей'.")
+                         # Не прерываем все сохранение, только изменение действия
+                    else:
+                    # --- КОНЕЦ ПРОВЕРКИ ---
+                        import json
+                        action = 'hotkey:' + json.dumps(action_combo, ensure_ascii=False)
+
+                new_hk_data['action'] = action
+
+                # Обновляем хоткей в списке только если что-то изменилось
+                if hotkeys[current_hk_index] != new_hk_data:
+                    hotkeys[current_hk_index] = new_hk_data
+                    self.save_hotkeys(hotkeys) # Сохраняем только если были изменения
+                    print("Хоткей успешно сохранен. Перерегистрация произойдет автоматически.") # Убрали прямой вызов register_hotkeys
+                    # try:
+                    #     import main
+                    #     main.register_hotkeys() # <--- УДАЛЕНО
+                    # except Exception as e:
+                    #     print(f'Ошибка перерегистрации хоткеев после сохранения: {e}')
+
+                    # Обновляем UI
+                    self.update_hotkey_list(self.type_list.currentRow())
+                    # Восстанавливаем выделение
+                    self.hotkey_list.setCurrentRow(row)
+
+            except Exception as save_err:
+                 print(f"Критическая ошибка при сохранении изменений хоткея: {save_err}")
+
+        # Подключаем сигналы к save_changes
         if hk.get('type', 'keyboard') == 'keyboard':
-            combo_input.textChanged.connect(save_changes)
-        else:
-            gesture_combo.currentIndexChanged.connect(save_changes)
+            # Используем editingFinished для сохранения после завершения ввода
+            combo_input.editingFinished.connect(save_changes)
+            # --- ДОБАВЛЕНО: Подключаем scope/app ---
             scope_type.currentIndexChanged.connect(save_changes)
             app_combo.currentIndexChanged.connect(save_changes)
+            # --- КОНЕЦ ДОБАВЛЕНИЯ ---
+        else: # trackpad
+            gesture_combo.currentIndexChanged.connect(save_changes)
+            scope_type.currentIndexChanged.connect(save_changes)
+            app_combo.currentIndexChanged.connect(save_changes) # Или editingFinished, если разрешен ввод
+
         action_type.currentIndexChanged.connect(save_changes)
-        action_input.textChanged.connect(save_changes)
-        hotkey_input.textChanged.connect(save_changes)
+        action_input.editingFinished.connect(save_changes) # Используем editingFinished
+        hotkey_input.editingFinished.connect(save_changes) # Используем editingFinished
+
         group.setLayout(grid)
         outer_vbox.addWidget(group)
         outer_vbox.addStretch()
@@ -335,11 +489,12 @@ class SettingsWindow(QtWidgets.QWidget):
                 break
         self.save_hotkeys(hotkeys)
         self.update_hotkey_list(idx)
-        try:
-            import main
-            main.register_hotkeys()
-        except Exception as e:
-            print(f'Ошибка перерегистрации хоткеев: {e}')
+        print("Хоткей удален. Перерегистрация произойдет автоматически.") # Убрали прямой вызов register_hotkeys
+        # try:
+        #     import main
+        #     main.register_hotkeys() # <--- УДАЛЕНО
+        # except Exception as e:
+        #     print(f'Ошибка перерегистрации хоткеев: {e}')
 
     def _add_keyboard_hotkey(self):
         # ...переиспользовать старый on_add для клавиатуры...
@@ -382,11 +537,12 @@ class SettingsWindow(QtWidgets.QWidget):
                 hotkeys = self.load_hotkeys()
                 hotkeys.append({'type': 'keyboard', 'combo': combo, 'gesture': '', 'action': action, 'scope': scope, 'app': app})
                 self.save_hotkeys(hotkeys)
-                try:
-                    import main
-                    main.register_hotkeys()
-                except Exception as e:
-                    print(f'Ошибка перерегистрации хоткеев: {e}')
+                print("Клавиатурный хоткей добавлен. Перерегистрация произойдет автоматически.") # Убрали прямой вызов register_hotkeys
+                # try:
+                #     import main
+                #     main.register_hotkeys() # <--- УДАЛЕНО
+                # except Exception as e:
+                #     print(f'Ошибка перерегистрации хоткеев: {e}')
 
     def _add_trackpad_hotkey(self):
         dlg = QtWidgets.QDialog(self)
@@ -450,11 +606,12 @@ class SettingsWindow(QtWidgets.QWidget):
                 hotkeys = self.load_hotkeys()
                 hotkeys.append({'type': 'trackpad', 'combo': None, 'gesture': gesture, 'action': action, 'scope': scope, 'app': app})
                 self.save_hotkeys(hotkeys)
-                try:
-                    import main
-                    main.register_hotkeys()
-                except Exception as e:
-                    print(f'Ошибка перерегистрации хоткеев: {e}')
+                print("Трекпад-жест добавлен. Перерегистрация произойдет автоматически.") # Убрали прямой вызов register_hotkeys
+                # try:
+                #     import main
+                #     main.register_hotkeys() # <--- УДАЛЕНО
+                # except Exception as e:
+                #     print(f'Ошибка перерегистрации хоткеев: {e}')
 
     def _edit_keyboard_hotkey(self, hk):
         # ...можно переиспользовать on_edit для клавиатуры...
@@ -540,11 +697,12 @@ class SettingsWindow(QtWidgets.QWidget):
                         hotkeys[i] = {'type': 'keyboard', 'combo': combo, 'gesture': '', 'action': action, 'scope': scope, 'app': app}
                         break
                 self.save_hotkeys(hotkeys)
-                try:
-                    import main
-                    main.register_hotkeys()
-                except Exception as e:
-                    print(f'Ошибка перерегистрации хоткеев: {e}')
+                print("Клавиатурный хоткей изменен. Перерегистрация произойдет автоматически.") # Убрали прямой вызов register_hotkeys
+                # try:
+                #     import main
+                #     main.register_hotkeys() # <--- УДАЛЕНО
+                # except Exception as e:
+                #     print(f'Ошибка перерегистрации хоткеев: {e}')
 
     def _edit_trackpad_hotkey(self, hk):
         dlg = QtWidgets.QDialog(self)
@@ -565,15 +723,6 @@ class SettingsWindow(QtWidgets.QWidget):
         vbox.addWidget(gesture_combo)
         action_type = QtWidgets.QComboBox()
         action_type.addItems(['Открыть сайт', 'Запустить программу/команду', 'Нажать хоткей'])
-        is_open = hk.get('action', '').startswith('open ')
-        is_run = hk.get('action', '').startswith('run ')
-        is_hotkey = hk.get('action', '').startswith('hotkey:')
-        if is_open:
-            action_type.setCurrentIndex(0)
-        elif is_run:
-            action_type.setCurrentIndex(1)
-        else:
-            action_type.setCurrentIndex(2)
         vbox.addWidget(QtWidgets.QLabel('Тип действия:'))
         vbox.addWidget(action_type)
         action_input = QtWidgets.QLineEdit()
@@ -642,15 +791,19 @@ class SettingsWindow(QtWidgets.QWidget):
                         hotkeys[i] = {'type': 'trackpad', 'combo': None, 'gesture': gesture, 'action': action, 'scope': scope, 'app': app}
                         break
                 self.save_hotkeys(hotkeys)
-                try:
-                    import main
-                    main.register_hotkeys()
-                except Exception as e:
-                    print(f'Ошибка перерегистрации хоткеев: {e}')
+                print("Трекпад-жест изменен. Перерегистрация произойдет автоматически.") # Убрали прямой вызов register_hotkeys
+                # try:
+                #     import main
+                #     main.register_hotkeys() # <--- УДАЛЕНО
+                # except Exception as e:
+                #     print(f'Ошибка перерегистрации хоткеев: {e}')
 
 def show_settings_window(load_hotkeys, save_hotkeys):
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
     win = SettingsWindow(load_hotkeys, save_hotkeys)
     win.setWindowModality(QtCore.Qt.ApplicationModal)
+    # Показываем и поднимаем окно в передний план
     win.show()
-    app.exec_()
+    win.raise_()
+    win.activateWindow()
+    win.exec_()

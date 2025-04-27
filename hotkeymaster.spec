@@ -1,9 +1,18 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+from PyQt5.QtCore import QLibraryInfo
+import os
+
+# Определяем динамически путь к Qt-плагинам
+plugin_root = QLibraryInfo.location(QLibraryInfo.PluginsPath)
+plugin_dir = os.path.join(plugin_root, 'platforms')
+
 datas = [
     ('hotkeys.json', '.'),
     ('icons/HotkeyMaster.icns', 'icons'),
     ('icons/tray_icon.png', 'icons'),
+    # Платформенные плагины Qt для macOS
+    (plugin_dir, 'platforms'),
 ]
 
 hiddenimports = [

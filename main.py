@@ -1,70 +1,31 @@
 import sys
 import threading
-from AppKit import NSStatusBar, NSVariableStatusItemLength, NSMenu, NSMenuItem, NSApplication, NSImage
-from Foundation import NSObject, NSLog
-from objc import selector, super
-from pynput import keyboard
-import threading
 import signal
 import subprocess
 import os
 import json
-import pystray
-from PIL import Image, ImageDraw
+import time # Добавим импорт time
+from PyQt5.QtWidgets import QSystemTrayIcon, QMenu, QAction
+from PyQt5.QtGui import QIcon
 import logging
 from ui import show_settings_window
 import Quartz
 import socket
 from trackpad_engine import TrackpadGestureEngine
+# --- Добавляем импорты Qt ---
+from PyQt5.QtCore import QObject, pyqtSignal, Qt, QCoreApplication
+from PyQt5 import QtWidgets
+# --- Конец импортов Qt ---
+from Foundation import NSObject
+from objc import selector
+
+from hotkey_engine import (
+    load_hotkeys, save_hotkeys, run_action, get_active_app_name, start_quartz_hotkey_listener
+)
 
 HOTKEYS_FILE = 'hotkeys.json'
 logging.basicConfig(level=logging.DEBUG, format='[%(asctime)s] %(levelname)s: %(message)s')
 logger = logging.getLogger('hotkeymaster')
-
-def load_hotkeys():
-    try:
-        with open(HOTKEYS_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except FileNotFoundError:
-        # Если файла нет — создаём пустой
-        with open(HOTKEYS_FILE, 'w', encoding='utf-8') as f:
-            f.write('[]')
-        return []
-    except json.JSONDecodeError:
-        return []
-
-def save_hotkeys(hotkeys):
-    with open(HOTKEYS_FILE, 'w', encoding='utf-8') as f:
-        json.dump(hotkeys, f, ensure_ascii=False, indent=2)
-
-def on_hotkey():
-    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
-    QtWidgets.QMessageBox.information(None, 'Hotkey', 'Глобальный хоткей Option+T сработал!')
-
-def start_hotkey_listener():
-    COMBO = {keyboard.Key.alt, keyboard.KeyCode.from_char('t')}
-    current = set()
-    def on_press(key):
-        if key in COMBO or (hasattr(key, 'char') and key.char and key.char.lower() == 't'):
-            current.add(key)
-            if all(k in current or (k == keyboard.KeyCode.from_char('t') and keyboard.KeyCode.from_char('t') in current) for k in COMBO):
-                on_hotkey()
-    def on_release(key):
-        if key in current:
-            current.remove(key)
-    listener = keyboard.Listener(on_press=on_press, on_release=on_release)
-    listener.daemon = True
-    listener.start()
-
-# Глобальные переменные для хранения хоткеев (заглушка)
-hotkeys = {}
-_hotkey_listeners = []
-
-def unregister_hotkeys():
-    global _hotkey_listeners
-    for listener in _hotkey_listeners:
-        listener.stop()
-    _hotkey_listeners = []
 
 def get_active_app_name():
     # Получить имя активного приложения через Quartz
@@ -125,109 +86,26 @@ def run_action(action):
     else:
         logger.debug(f'Неизвестное действие: {action}')
 
-def parse_combo(combo):
-    # combo — это dict: {'mods': [...], 'vk': int, 'disp': ...}
-    if isinstance(combo, dict):
-        mods = set(combo.get('mods', []))
-        vk = combo.get('vk')
-        return (frozenset(mods), vk)
-    # для обратной совместимости со старыми строками
-    return (frozenset(), None)
-
-def register_hotkeys():
-    unregister_hotkeys()
-    hotkeys = load_hotkeys()
-    logger.debug(f'Регистрируем хоткеи: {hotkeys}')
-    for hk in hotkeys:
-        hk_type = hk.get('type', 'keyboard')
-        # Удалена заглушка для трекпад-жестов — теперь они обрабатываются в trackpad_engine
-        if hk_type == 'trackpad':
-            continue
-        mods, vk = parse_combo(hk.get('combo', {}))
-        action = hk.get('action', '')
-        scope = hk.get('scope', 'global')
-        app_name = hk.get('app', '')
-        current_mods = set()
-        def make_on_press(mods, vk, action, scope, app_name):
-            def on_press(key):
-                key_vk = getattr(key, 'vk', None)
-                logger.debug(f'[HOTKEY DEBUG] on_press вызван: key={key}, vk={key_vk}, current_mods={current_mods}, mods={mods}, vk_target={vk}')
-                # Модификаторы
-                if key == keyboard.Key.ctrl or key == keyboard.Key.ctrl_l or key == keyboard.Key.ctrl_r:
-                    current_mods.add('Ctrl')
-                if key == keyboard.Key.alt or key == keyboard.Key.alt_l or key == keyboard.Key.alt_r:
-                    current_mods.add('Alt')
-                if key == keyboard.Key.shift or key == keyboard.Key.shift_l or key == keyboard.Key.shift_r:
-                    current_mods.add('Shift')
-                if key == keyboard.Key.cmd or key == keyboard.Key.cmd_l or key == keyboard.Key.cmd_r:
-                    current_mods.add('Cmd')
-                # Проверяем хоткей по vk и модификаторам
-                if vk is not None and key_vk == vk and mods.issubset(current_mods):
-                    # Проверка области действия
-                    if scope == 'app' and app_name:
-                        active_app = get_active_app_name()
-                        logger.debug(f'Требуется фокус приложения: {app_name}, сейчас активно: {active_app}')
-                        if active_app and app_name not in active_app:
-                            return
-                    logger.debug(f'Хоткей сработал: {hk.get("combo", {})}')
-                    run_action(action)
-            return on_press
-        def make_on_release():
-            def on_release(key):
-                if key == keyboard.Key.ctrl or key == keyboard.Key.ctrl_l or key == keyboard.Key.ctrl_r:
-                    current_mods.discard('Ctrl')
-                if key == keyboard.Key.alt or key == keyboard.Key.alt_l or key == keyboard.Key.alt_r:
-                    current_mods.discard('Alt')
-                if key == keyboard.Key.shift or key == keyboard.Key.shift_l or key == keyboard.Key.shift_r:
-                    current_mods.discard('Shift')
-                if key == keyboard.Key.cmd or key == keyboard.Key.cmd_l or key == keyboard.Key.cmd_r:
-                    current_mods.discard('Cmd')
-            return on_release
-        logger.debug(f'[HOTKEY DEBUG] Стартую Listener для vk={vk}, mods={mods}, scope={scope}, app={app_name}')
-        listener = keyboard.Listener(on_press=make_on_press(mods, vk, action, scope, app_name), on_release=make_on_release())
-        listener.daemon = True
-        listener.start()
-        _hotkey_listeners.append(listener)
-
-# Класс для обработки событий меню трея
-class TrayDelegate(NSObject):
-    def show_settings_(self, sender):
-        open_settings_window()
-    show_settings_ = selector(show_settings_, signature=b'v@:@')
-
-    def quit_(self, sender):
-        NSApplication.sharedApplication().terminate_(self)
-    quit_ = selector(quit_, signature=b'v@:@')
-
-    def validateMenuItem_(self, item):
-        return True
-
 def open_settings_window():
-    from PyQt5 import QtWidgets
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     try:
+        # Активируем приложение и приводим окно настроек на передний план
+        import AppKit
+        NSApp = AppKit.NSApp
+        NSApp.activateIgnoringOtherApps_(True)
+        # Временно меняем политику активации, чтобы окно QDialog отображалось
+        NSApp.setActivationPolicy_(AppKit.NSApplicationActivationPolicyRegular)
+    except Exception:
+        pass
+    try:
         show_settings_window(load_hotkeys, save_hotkeys)
-    except Exception as e:
-        logger.error(f'Ошибка открытия окна настроек: {e}')
-
-def hotkey_thread_func():
-    last_mtime = None
-    # Если файла нет — создаём пустой
-    if not os.path.exists(HOTKEYS_FILE):
-        with open(HOTKEYS_FILE, 'w', encoding='utf-8') as f:
-            f.write('[]')
-    while True:
+    finally:
+        # Возвращаем политику к Accessory, чтобы скрыть из Dock
         try:
-            mtime = os.path.getmtime(HOTKEYS_FILE)
-            if last_mtime is None or mtime != last_mtime:
-                logger.debug('hotkeys.json изменён, перерегистрирую хоткеи')
-                register_hotkeys()
-                last_mtime = mtime
-        except Exception as e:
-            logger.debug(f'Ошибка проверки hotkeys.json: {e}')
-        threading.Event().wait(1)
-
-tray_delegate = None  # глобальная переменная для хранения делегата
+            import AppKit
+            NSApp.setActivationPolicy_(AppKit.NSApplicationActivationPolicyAccessory)
+        except Exception:
+            pass
 
 def resource_path(rel_path):
     import sys, os
@@ -238,56 +116,49 @@ def resource_path(rel_path):
             return resources_icons
     return os.path.join(os.path.abspath(os.path.dirname(__file__)), 'icons', rel_path)
 
-def create_tray():
-    def on_settings(icon, item=None):
-        logger.debug('Открытие окна настроек')
-        open_settings_window()
-    def on_quit(icon, item=None):
-        logger.debug('Выход через меню трея')
-        icon.stop()
-        os._exit(0)
-    # Используем PNG-иконку для трея
+def create_tray_qt(app):
+    # Создание системного трей-икон
     icon_path = resource_path('tray_icon.png')
-    image = Image.open(icon_path)
-    menu = pystray.Menu(
-        pystray.MenuItem('Настройки', on_settings),
-        pystray.MenuItem('Выход', on_quit)
-    )
-    icon = pystray.Icon('HotkeyMaster', image, 'HotkeyMaster', menu)
-    icon.run()
+    tray_icon = QSystemTrayIcon(QIcon(icon_path), parent=app)
+    menu = QMenu()
+    settings_action = QAction('Настройки', parent=app)
+    settings_action.triggered.connect(open_settings_window)
+    quit_action = QAction('Выход', parent=app)
+    quit_action.triggered.connect(app.quit)
+    menu.addAction(settings_action)
+    menu.addAction(quit_action)
+    tray_icon.setContextMenu(menu)
+    tray_icon.show()
+    return tray_icon
 
-def check_accessibility():
+def check_accessibility_and_warn():
     try:
         import Quartz
         if Quartz.CGPreflightListenEventAccess():
-            logger.debug("Есть права Universal Access (Accessibility)")
+            logger.info("Есть права Universal Access (Accessibility)")
             return True
         else:
-            logger.debug("Нет прав Universal Access (Accessibility)")
+            logger.warning("Нет прав Universal Access (Accessibility)")
+            app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+            msg = QtWidgets.QMessageBox()
+            msg.setIcon(QtWidgets.QMessageBox.Warning)
+            msg.setWindowTitle("Требуется доступ к управлению компьютером")
+            msg.setText(
+                "Для работы глобальных хоткеев нужно разрешить доступ к управлению компьютером.\n\n"
+                "1. Откройте: Системные настройки → Конфиденциальность и безопасность → Универсальный доступ\n"
+                "2. Добавьте сюда ваш терминал (или HotkeyMaster.app) и поставьте галочку.\n\n"
+                "После этого перезапустите программу."
+            )
+            btn = msg.addButton("Открыть настройки", QtWidgets.QMessageBox.AcceptRole)
+            msg.addButton("Закрыть", QtWidgets.QMessageBox.RejectRole)
+            msg.exec_()
+            if msg.clickedButton() == btn:
+                import subprocess
+                subprocess.Popen(['open', 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility'])
             return False
     except Exception as e:
-        logger.debug(f"Ошибка проверки прав: {e}")
+        logger.error(f"Ошибка проверки прав Accessibility: {e}")
         return False
-
-def show_accessibility_warning():
-    logger.debug('Показываю окно с инструкцией по выдаче прав Universal Access')
-    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
-    msg = QtWidgets.QMessageBox()
-    msg.setIcon(QtWidgets.QMessageBox.Warning)
-    msg.setWindowTitle("Требуется доступ")
-    msg.setText(
-        "Для работы глобальных хоткеев нужно разрешить доступ к управлению компьютером.\n\n"
-        "1. Откройте: Системные настройки → Конфиденциальность и безопасность → Универсальный доступ\n"
-        "2. Добавьте HotkeyMaster и поставьте галочку.\n\n"
-        "После этого перезапустите программу."
-    )
-    btn = msg.addButton("Открыть настройки", QtWidgets.QMessageBox.AcceptRole)
-    msg.addButton("Закрыть", QtWidgets.QMessageBox.RejectRole)
-    msg.exec_()
-    if msg.clickedButton() == btn:
-        logger.debug('Открываю настройки Universal Access через open ...')
-        import subprocess
-        subprocess.Popen(['open', 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility'])
 
 def is_another_instance_running():
     import socket
@@ -307,31 +178,90 @@ def is_another_instance_running():
     except OSError:
         return True
 
-if __name__ == '__main__':
-    from PyQt5 import QtWidgets
-    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
-    if '--settings' in sys.argv:
-        if not check_accessibility():
-            show_accessibility_warning()
-            sys.exit(1)
-        show_settings_window(load_hotkeys, save_hotkeys)
+# Убедимся, что при выходе все слушатели останавливаются
+def cleanup_listeners():
+    logger.info("Cleaning up listeners before exit...")
+    # Останавливаем все
+
+def main():
+    # --- Устанавливаем путь к Qt-плагинам для PyQt5 (важно для .app) ---
+    try:
+        if getattr(sys, 'frozen', False):
+            # Для собранного .app
+            plugin_path = os.path.join(os.path.dirname(sys.executable), 'platforms')
+        else:
+            # Для dev-режима
+            from PyQt5 import QtCore
+            plugin_path = os.path.join(os.path.dirname(QtCore.__file__), 'plugins')
+        os.environ['QT_QPA_PLATFORM_PLUGIN_PATH'] = plugin_path
+        logger.info(f'Set QT_QPA_PLATFORM_PLUGIN_PATH={plugin_path}')
+    except Exception as e:
+        logger.warning(f'Не удалось установить QT_QPA_PLATFORM_PLUGIN_PATH: {e}')
+    # --- Конец установки пути к плагинам ---
+
+    # --- Создаём QApplication и скрываем из Dock ---
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
+    # Скрываем из Dock и Cmd+Tab (dev-режим)
+    try:
+        import AppKit
+        AppKit.NSApp.setActivationPolicy_(AppKit.NSApplicationActivationPolicyAccessory)
+        logger.info('App hidden from Dock/Cmd+Tab (Accessory mode)')
+    except Exception as e:
+        logger.warning(f'Не удалось скрыть из Dock: {e}')
+    # Устанавливаем QuitOnLastWindowClosed в False
+    app.setQuitOnLastWindowClosed(False)
+
+    # Регистрируем очистку при выходе
+    import atexit
+    atexit.register(cleanup_listeners)
+
+    # Основной режим работы
+    logger.info("Running in normal mode.")
+    if is_another_instance_running():
+        print('HotkeyMaster уже запущен.')
+        logger.warning("Another instance is running. Exiting.")
         sys.exit(0)
-    else:
-        if is_another_instance_running():
-            print('HotkeyMaster уже запущен.')
-            sys.exit(0)
-        if not check_accessibility():
-            show_accessibility_warning()
-            sys.exit(1)
-        # Трекпад-движок: запуск в отдельном потоке
-        def get_gesture_actions():
-            return load_hotkeys()
-        trackpad_engine = TrackpadGestureEngine(get_gesture_actions, run_action, get_active_app_name)
-        try:
-            trackpad_engine.start()
-        except Exception as e:
-            logger.error(f'Ошибка запуска трекпад-движка: {e}')
-        # Трей в главном потоке, хоткей-листенер — в отдельном
-        hk_thread = threading.Thread(target=hotkey_thread_func, daemon=True)
-        hk_thread.start()
-        create_tray()
+
+    # Проверяем права Accessibility и предупреждаем пользователя
+    if not check_accessibility_and_warn():
+        logger.warning("Нет прав Accessibility — глобальные хоткеи работать не будут!")
+
+    # Запуск глобального слушателя клавиатурных хоткеев через Quartz
+    start_quartz_hotkey_listener()
+
+    # Запуск трекпад-движка в отдельном потоке
+    def get_gesture_actions():
+        return load_hotkeys()
+    trackpad_engine = TrackpadGestureEngine(get_gesture_actions, run_action, get_active_app_name)
+    try:
+        trackpad_engine.start()
+        logger.info("Trackpad engine started.")
+    except Exception as e:
+        logger.error(f'Ошибка запуска трекпад-движка: {e}')
+
+    # Создаём Qt-трей
+    logger.info("Creating Qt system tray icon.")
+    try:
+        import AppKit
+        NSApp = AppKit.NSApp
+        # Временно показываем иконку в строке меню
+        NSApp.setActivationPolicy_(AppKit.NSApplicationActivationPolicyRegular)
+    except Exception:
+        pass
+
+    tray_icon = create_tray_qt(app)
+
+    # Сразу возвращаем политику Accessory (убрать из Dock)
+    try:
+        NSApp.setActivationPolicy_(AppKit.NSApplicationActivationPolicyAccessory)
+    except Exception:
+        pass
+
+    # Запуск основного цикла событий Qt
+    logger.info("Starting Qt application event loop...")
+    app_exit_code = app.exec_()
+    logger.info(f"Qt application event loop finished with code {app_exit_code}.")
+    sys.exit(app_exit_code)
+
+if __name__ == '__main__':
+    main()
