@@ -12,6 +12,10 @@ PYTHON=python3.12
 SIGN_IDENTITY="Developer ID Application: Rocker (TEAMID)"  # Замени на свой identity
 
 build:
+	clang -F /System/Library/PrivateFrameworks \
+    -I /System/Library/PrivateFrameworks/CoreDisplay.framework/Headers \
+    -framework CoreDisplay -framework CoreGraphics \
+    coredisplay_helper.c -o coredisplay_helper  # Компилируем C-хелпер
 	$(PYTHON) -m PyInstaller --clean --noconfirm $(SPEC_FILE)
 
 clean:

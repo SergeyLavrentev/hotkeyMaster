@@ -183,6 +183,17 @@ def cleanup_listeners():
     logger.info("Cleaning up listeners before exit...")
     # Останавливаем все
 
+def load_general_settings():
+    import os, json
+    path = os.path.join(os.path.expanduser('~'), 'Library', 'Application Support', 'HotkeyMaster', 'settings.json')
+    if os.path.exists(path):
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {'autostart': False}
+
 def main():
     # --- Устанавливаем путь к Qt-плагинам для PyQt5 (важно для .app) ---
     try:
@@ -222,6 +233,8 @@ def main():
         logger.warning("Another instance is running. Exiting.")
         sys.exit(0)
 
+    general_settings = load_general_settings()
+
     # Проверяем права Accessibility и предупреждаем пользователя
     if not check_accessibility_and_warn():
         logger.warning("Нет прав Accessibility — глобальные хоткеи работать не будут!")
@@ -239,23 +252,8 @@ def main():
     except Exception as e:
         logger.error(f'Ошибка запуска трекпад-движка: {e}')
 
-    # Создаём Qt-трей
-    logger.info("Creating Qt system tray icon.")
-    try:
-        import AppKit
-        NSApp = AppKit.NSApp
-        # Временно показываем иконку в строке меню
-        NSApp.setActivationPolicy_(AppKit.NSApplicationActivationPolicyRegular)
-    except Exception:
-        pass
-
+    # --- Показывать/скрывать трей ---
     tray_icon = create_tray_qt(app)
-
-    # Сразу возвращаем политику Accessory (убрать из Dock)
-    try:
-        NSApp.setActivationPolicy_(AppKit.NSApplicationActivationPolicyAccessory)
-    except Exception:
-        pass
 
     # Запуск основного цикла событий Qt
     logger.info("Starting Qt application event loop...")

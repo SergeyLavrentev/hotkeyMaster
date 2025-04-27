@@ -4,6 +4,10 @@ import threading
 import Quartz
 from PyQt5 import QtWidgets
 import sys, os
+import ctypes, ctypes.util
+from Quartz import CGMainDisplayID
+import platform  
+import subprocess  # для coredisplay_helper
 
 logger = logging.getLogger('hotkeymaster')
 
@@ -53,6 +57,7 @@ def get_active_app_name():
     return None
 
 def run_action(action):
+    import subprocess  # явный импорт для корректного обращения внутри функции
     logger.debug(f'Выполнение действия: {action}')
     if action.startswith('message:'):
         msg = action[len('message:'):]
@@ -68,7 +73,6 @@ def run_action(action):
     elif action.startswith('run '):
         cmd = action[len('run '):].strip()
         logger.debug(f'Запускаю команду: {cmd}')
-        import subprocess
         try:
             subprocess.Popen(cmd, shell=True)
         except Exception as e:
@@ -99,6 +103,60 @@ def run_action(action):
                 CGEventPost(kCGHIDEventTap, ev)
         except Exception as e:
             logger.error(f'Ошибка эмуляции хоткея: {e}')
+    elif action.startswith('brightness_set '):
+        try:
+            percent = int(action.split()[1])
+            val = max(0.0, min(1.0, percent / 100.0))
+            # Если есть скомпилированный хелпер, используем его на Apple Silicon
+            helper = os.path.join(os.path.dirname(__file__), 'coredisplay_helper')
+            if os.path.exists(helper) and os.access(helper, os.X_OK):
+                subprocess.run([helper, str(val)], check=True)
+                return
+            # Если приватный CoreDisplay API загружен, вызываем напрямую
+            if CoreDisplay_Display_SetUserBrightness:
+                disp = CGMainDisplayID()
+                res = CoreDisplay_Display_SetUserBrightness(disp, ctypes.c_float(val))
+                if res != 0:
+                    logger.error(f'Ошибка установки яркости via CoreDisplay: {res}')
+                return
+            # Fallback: IOKit + CoreFoundation
+            set_display_brightness(val)
+        except Exception as e:
+            logger.error(f'Ошибка установки яркости: {e}')
+    elif action == 'brightness_up':
+        try:
+            cur = get_display_brightness()
+            new_val = min(1.0, cur + 0.1)
+            helper = os.path.join(os.path.dirname(__file__), 'coredisplay_helper')
+            if os.path.exists(helper) and os.access(helper, os.X_OK):
+                subprocess.run([helper, str(new_val)], check=True)
+                return
+            if CoreDisplay_Display_SetUserBrightness:
+                disp = CGMainDisplayID()
+                res = CoreDisplay_Display_SetUserBrightness(disp, ctypes.c_float(new_val))
+                if res != 0:
+                    logger.error(f'Ошибка увеличения яркости via CoreDisplay: {res}')
+                return
+            set_display_brightness(new_val)
+        except Exception as e:
+            logger.error(f'Ошибка увеличения яркости: {e}')
+    elif action == 'brightness_down':
+        try:
+            cur = get_display_brightness()
+            new_val = max(0.0, cur - 0.1)
+            helper = os.path.join(os.path.dirname(__file__), 'coredisplay_helper')
+            if os.path.exists(helper) and os.access(helper, os.X_OK):
+                subprocess.run([helper, str(new_val)], check=True)
+                return
+            if CoreDisplay_Display_SetUserBrightness:
+                disp = CGMainDisplayID()
+                res = CoreDisplay_Display_SetUserBrightness(disp, ctypes.c_float(new_val))
+                if res != 0:
+                    logger.error(f'Ошибка уменьшения яркости via CoreDisplay: {res}')
+                return
+            set_display_brightness(new_val)
+        except Exception as e:
+            logger.error(f'Ошибка уменьшения яркости: {e}')
     else:
         logger.debug(f'Неизвестное действие: {action}')
 
@@ -168,3 +226,47 @@ def start_quartz_hotkey_listener():
         logger.info('Quartz hotkey listener started.')
         Quartz.CFRunLoopRun()
     threading.Thread(target=run_event_loop, name="QuartzHotkeyThread", daemon=True).start()
+
+# --- Добавлено: API управления яркостью на Apple Silicon через CoreDisplay ---
+_core_display = None
+CoreDisplay_Display_SetUserBrightness = None
+try:
+    # Попыток через PyObjC
+    import CoreDisplay as _cd
+    CoreDisplay_Display_SetUserBrightness = _cd.CoreDisplay_Display_SetUserBrightness
+    logger.info('Loaded CoreDisplay via PyObjC')
+except ImportError:
+    # Fallback: поиск через ctypes.util
+    _lib = ctypes.util.find_library('CoreDisplay')
+    if _lib:
+        try:
+            _core_display = ctypes.cdll.LoadLibrary(_lib)
+            CoreDisplay_Display_SetUserBrightness = getattr(_core_display, 'CoreDisplay_Display_SetUserBrightness', None)
+            if CoreDisplay_Display_SetUserBrightness:
+                CoreDisplay_Display_SetUserBrightness.argtypes = [ctypes.c_uint32, ctypes.c_float]
+                CoreDisplay_Display_SetUserBrightness.restype = ctypes.c_int
+                logger.info(f'Loaded CoreDisplay via ctypes.util.find_library: {_lib}')
+        except Exception as e:
+            logger.warning(f'Ошибка загрузки CoreDisplay из {_lib}: {e}')
+    # Fallback явные пути
+    possible_paths = [
+        '/System/Library/PrivateFrameworks/CoreDisplay.framework/CoreDisplay',
+        '/System/Library/PrivateFrameworks/CoreDisplay.framework/Versions/A/CoreDisplay',
+    ]
+    for pd in possible_paths:
+        if os.path.exists(pd):
+            try:
+                _core_display = ctypes.cdll.LoadLibrary(pd)
+                CoreDisplay_Display_SetUserBrightness = getattr(_core_display, 'CoreDisplay_Display_SetUserBrightness', None)
+                if CoreDisplay_Display_SetUserBrightness:
+                    CoreDisplay_Display_SetUserBrightness.argtypes = [ctypes.c_uint32, ctypes.c_float]
+                    CoreDisplay_Display_SetUserBrightness.restype = ctypes.c_int
+                    logger.info(f'Loaded CoreDisplay from {pd}')
+                    break
+            except Exception as e:
+                logger.warning(f'Ошибка загрузки CoreDisplay из {pd}: {e}')
+    else:
+        if CoreDisplay_Display_SetUserBrightness is None:
+            logger.warning('CoreDisplay framework not found in expected locations')
+except Exception as e:
+    logger.warning(f'Ошибка загрузки CoreDisplay framework: {e}')
