@@ -13,6 +13,8 @@ datas = [
     ('icons/tray_icon.png', 'icons'),
     # Платформенные плагины Qt для macOS
     (plugin_dir, 'platforms'),
+    # Добавляем скомпилированный хелпер
+    ('coredisplay_helper', '.')
 ]
 
 hiddenimports = [

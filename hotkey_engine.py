@@ -1,15 +1,73 @@
-import json
-import logging
-import threading
+import sys # Добавляем импорт sys
+import os # Убедимся, что os импортирован
+import subprocess # Убедимся, что subprocess импортирован
+import logging # Убедимся, что logging импортирован
+import ctypes # Убедимся, что ctypes импортирован
+import threading # Добавляем импорт threading
+import json # Добавляем импорт json
 import Quartz
 from PyQt5 import QtWidgets
-import sys, os
-import ctypes, ctypes.util
-from Quartz import CGMainDisplayID
-import platform  
-import subprocess  # для coredisplay_helper
+from Quartz import CGMainDisplayID, CGEventPost, kCGHIDEventTap, CGEventCreateKeyboardEvent, CGEventSetFlags, kCGEventFlagMaskShift, kCGEventFlagMaskControl, kCGEventFlagMaskAlternate, kCGEventFlagMaskCommand
 
-logger = logging.getLogger('hotkeymaster')
+logger = logging.getLogger(__name__)
+
+# --- Определяем путь к хелперу ---
+if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+    # Запущено как собранное приложение (.app)
+    # Хелпер ожидается рядом с исполняемым файлом в Contents/MacOS
+    helper_base_path = os.path.dirname(sys.executable)
+else:
+    # Запущено как обычный скрипт
+    # Хелпер ожидается рядом с этим скриптом (.py)
+    helper_base_path = os.path.dirname(__file__)
+
+helper_path = os.path.join(helper_base_path, 'coredisplay_helper')
+logger.info(f"Путь к coredisplay_helper: {helper_path}") # Добавим лог для отладки
+
+
+# --- Старая логика загрузки CoreDisplay (оставляем как fallback, если хелпер не найден) ---
+_core_display = None
+CoreDisplay_Display_SetUserBrightness = None
+try:
+    # Попыток через PyObjC
+    import CoreDisplay as _cd
+    CoreDisplay_Display_SetUserBrightness = _cd.CoreDisplay_Display_SetUserBrightness
+    logger.info('Loaded CoreDisplay via PyObjC')
+except ImportError:
+    # Fallback: поиск через ctypes.util
+    _lib = ctypes.util.find_library('CoreDisplay')
+    if _lib:
+        try:
+            _core_display = ctypes.cdll.LoadLibrary(_lib)
+            CoreDisplay_Display_SetUserBrightness = getattr(_core_display, 'CoreDisplay_Display_SetUserBrightness', None)
+            if CoreDisplay_Display_SetUserBrightness:
+                CoreDisplay_Display_SetUserBrightness.argtypes = [ctypes.c_uint32, ctypes.c_float]
+                CoreDisplay_Display_SetUserBrightness.restype = ctypes.c_int
+                logger.info(f'Loaded CoreDisplay via ctypes.util.find_library: {_lib}')
+        except Exception as e:
+            logger.warning(f'Ошибка загрузки CoreDisplay из {_lib}: {e}')
+    # Fallback явные пути
+    possible_paths = [
+        '/System/Library/PrivateFrameworks/CoreDisplay.framework/CoreDisplay',
+        '/System/Library/PrivateFrameworks/CoreDisplay.framework/Versions/A/CoreDisplay',
+    ]
+    for pd in possible_paths:
+        if os.path.exists(pd):
+            try:
+                _core_display = ctypes.cdll.LoadLibrary(pd)
+                CoreDisplay_Display_SetUserBrightness = getattr(_core_display, 'CoreDisplay_Display_SetUserBrightness', None)
+                if CoreDisplay_Display_SetUserBrightness:
+                    CoreDisplay_Display_SetUserBrightness.argtypes = [ctypes.c_uint32, ctypes.c_float]
+                    CoreDisplay_Display_SetUserBrightness.restype = ctypes.c_int
+                    logger.info(f'Loaded CoreDisplay from {pd}')
+                    break
+            except Exception as e:
+                logger.warning(f'Ошибка загрузки CoreDisplay из {pd}: {e}')
+    else:
+        if CoreDisplay_Display_SetUserBrightness is None:
+            logger.warning('CoreDisplay framework not found in expected locations')
+except Exception as e:
+    logger.warning(f'Ошибка загрузки CoreDisplay framework: {e}')
 
 # Используем Application Support для хранения настроек
 APP_SUPPORT_DIR = os.path.join(os.path.expanduser('~'), 'Library', 'Application Support', 'HotkeyMaster')
@@ -57,13 +115,8 @@ def get_active_app_name():
     return None
 
 def run_action(action):
-    import subprocess  # явный импорт для корректного обращения внутри функции
-    logger.debug(f'Выполнение действия: {action}')
-    if action.startswith('message:'):
-        msg = action[len('message:'):]
-        app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
-        QtWidgets.QMessageBox.information(None, 'Hotkey', msg)
-    elif action.startswith('open '):
+    logger.info(f"Выполнение действия: {action}")
+    if action.startswith('open '):
         url = action[len('open '):].strip()
         if not url.startswith('http://') and not url.startswith('https://'):
             url = 'https://' + url
@@ -83,11 +136,6 @@ def run_action(action):
             combo = json.loads(action[7:])
             mods = set(combo.get('mods', []))
             vk = combo.get('vk')
-            from Quartz import (
-                CGEventCreateKeyboardEvent, CGEventSetFlags,
-                CGEventPost, kCGHIDEventTap, kCGEventFlagMaskCommand,
-                kCGEventFlagMaskShift, kCGEventFlagMaskAlternate, kCGEventFlagMaskControl
-            )
             flags = 0
             if 'Cmd' in mods:
                 flags |= kCGEventFlagMaskCommand
@@ -107,58 +155,76 @@ def run_action(action):
         try:
             percent = int(action.split()[1])
             val = max(0.0, min(1.0, percent / 100.0))
-            # Если есть скомпилированный хелпер, используем его на Apple Silicon
-            helper = os.path.join(os.path.dirname(__file__), 'coredisplay_helper')
-            if os.path.exists(helper) and os.access(helper, os.X_OK):
-                subprocess.run([helper, str(val)], check=True)
+            # Используем определенный ранее helper_path
+            if os.path.exists(helper_path) and os.access(helper_path, os.X_OK):
+                logger.debug(f"Запуск хелпера: {helper_path} {val}")
+                result = subprocess.run([helper_path, str(val)], check=True, capture_output=True, text=True)
+                logger.debug(f"Хелпер выполнен. Output: {result.stdout} Stderr: {result.stderr}")
                 return
-            # Если приватный CoreDisplay API загружен, вызываем напрямую
+            else:
+                 logger.warning(f"Хелпер не найден или недоступен: {helper_path}. Попытка fallback...")
+            # Fallback: Если хелпер не найден/не сработал, пробуем старые методы
             if CoreDisplay_Display_SetUserBrightness:
                 disp = CGMainDisplayID()
                 res = CoreDisplay_Display_SetUserBrightness(disp, ctypes.c_float(val))
                 if res != 0:
                     logger.error(f'Ошибка установки яркости via CoreDisplay: {res}')
                 return
-            # Fallback: IOKit + CoreFoundation
-            set_display_brightness(val)
+            set_display_brightness(val) # IOKit fallback
+        except subprocess.CalledProcessError as e:
+             logger.error(f"Ошибка выполнения хелпера: {e}. Output: {e.stdout}. Stderr: {e.stderr}")
         except Exception as e:
             logger.error(f'Ошибка установки яркости: {e}')
     elif action == 'brightness_up':
         try:
             cur = get_display_brightness()
             new_val = min(1.0, cur + 0.1)
-            helper = os.path.join(os.path.dirname(__file__), 'coredisplay_helper')
-            if os.path.exists(helper) and os.access(helper, os.X_OK):
-                subprocess.run([helper, str(new_val)], check=True)
+             # Используем определенный ранее helper_path
+            if os.path.exists(helper_path) and os.access(helper_path, os.X_OK):
+                logger.debug(f"Запуск хелпера: {helper_path} {new_val}")
+                result = subprocess.run([helper_path, str(new_val)], check=True, capture_output=True, text=True)
+                logger.debug(f"Хелпер выполнен. Output: {result.stdout} Stderr: {result.stderr}")
                 return
+            else:
+                 logger.warning(f"Хелпер не найден или недоступен: {helper_path}. Попытка fallback...")
+            # Fallback
             if CoreDisplay_Display_SetUserBrightness:
                 disp = CGMainDisplayID()
                 res = CoreDisplay_Display_SetUserBrightness(disp, ctypes.c_float(new_val))
                 if res != 0:
                     logger.error(f'Ошибка увеличения яркости via CoreDisplay: {res}')
                 return
-            set_display_brightness(new_val)
+            set_display_brightness(new_val) # IOKit fallback
+        except subprocess.CalledProcessError as e:
+             logger.error(f"Ошибка выполнения хелпера: {e}. Output: {e.stdout}. Stderr: {e.stderr}")
         except Exception as e:
             logger.error(f'Ошибка увеличения яркости: {e}')
     elif action == 'brightness_down':
         try:
             cur = get_display_brightness()
             new_val = max(0.0, cur - 0.1)
-            helper = os.path.join(os.path.dirname(__file__), 'coredisplay_helper')
-            if os.path.exists(helper) and os.access(helper, os.X_OK):
-                subprocess.run([helper, str(new_val)], check=True)
+             # Используем определенный ранее helper_path
+            if os.path.exists(helper_path) and os.access(helper_path, os.X_OK):
+                logger.debug(f"Запуск хелпера: {helper_path} {new_val}")
+                result = subprocess.run([helper_path, str(new_val)], check=True, capture_output=True, text=True)
+                logger.debug(f"Хелпер выполнен. Output: {result.stdout} Stderr: {result.stderr}")
                 return
+            else:
+                 logger.warning(f"Хелпер не найден или недоступен: {helper_path}. Попытка fallback...")
+            # Fallback
             if CoreDisplay_Display_SetUserBrightness:
                 disp = CGMainDisplayID()
                 res = CoreDisplay_Display_SetUserBrightness(disp, ctypes.c_float(new_val))
                 if res != 0:
                     logger.error(f'Ошибка уменьшения яркости via CoreDisplay: {res}')
                 return
-            set_display_brightness(new_val)
+            set_display_brightness(new_val) # IOKit fallback
+        except subprocess.CalledProcessError as e:
+             logger.error(f"Ошибка выполнения хелпера: {e}. Output: {e.stdout}. Stderr: {e.stderr}")
         except Exception as e:
             logger.error(f'Ошибка уменьшения яркости: {e}')
     else:
-        logger.debug(f'Неизвестное действие: {action}')
+        logger.warning(f'Неизвестное действие: {action}')
 
 # --- Quartz глобальный слушатель ---
 def start_quartz_hotkey_listener():
@@ -226,47 +292,3 @@ def start_quartz_hotkey_listener():
         logger.info('Quartz hotkey listener started.')
         Quartz.CFRunLoopRun()
     threading.Thread(target=run_event_loop, name="QuartzHotkeyThread", daemon=True).start()
-
-# --- Добавлено: API управления яркостью на Apple Silicon через CoreDisplay ---
-_core_display = None
-CoreDisplay_Display_SetUserBrightness = None
-try:
-    # Попыток через PyObjC
-    import CoreDisplay as _cd
-    CoreDisplay_Display_SetUserBrightness = _cd.CoreDisplay_Display_SetUserBrightness
-    logger.info('Loaded CoreDisplay via PyObjC')
-except ImportError:
-    # Fallback: поиск через ctypes.util
-    _lib = ctypes.util.find_library('CoreDisplay')
-    if _lib:
-        try:
-            _core_display = ctypes.cdll.LoadLibrary(_lib)
-            CoreDisplay_Display_SetUserBrightness = getattr(_core_display, 'CoreDisplay_Display_SetUserBrightness', None)
-            if CoreDisplay_Display_SetUserBrightness:
-                CoreDisplay_Display_SetUserBrightness.argtypes = [ctypes.c_uint32, ctypes.c_float]
-                CoreDisplay_Display_SetUserBrightness.restype = ctypes.c_int
-                logger.info(f'Loaded CoreDisplay via ctypes.util.find_library: {_lib}')
-        except Exception as e:
-            logger.warning(f'Ошибка загрузки CoreDisplay из {_lib}: {e}')
-    # Fallback явные пути
-    possible_paths = [
-        '/System/Library/PrivateFrameworks/CoreDisplay.framework/CoreDisplay',
-        '/System/Library/PrivateFrameworks/CoreDisplay.framework/Versions/A/CoreDisplay',
-    ]
-    for pd in possible_paths:
-        if os.path.exists(pd):
-            try:
-                _core_display = ctypes.cdll.LoadLibrary(pd)
-                CoreDisplay_Display_SetUserBrightness = getattr(_core_display, 'CoreDisplay_Display_SetUserBrightness', None)
-                if CoreDisplay_Display_SetUserBrightness:
-                    CoreDisplay_Display_SetUserBrightness.argtypes = [ctypes.c_uint32, ctypes.c_float]
-                    CoreDisplay_Display_SetUserBrightness.restype = ctypes.c_int
-                    logger.info(f'Loaded CoreDisplay from {pd}')
-                    break
-            except Exception as e:
-                logger.warning(f'Ошибка загрузки CoreDisplay из {pd}: {e}')
-    else:
-        if CoreDisplay_Display_SetUserBrightness is None:
-            logger.warning('CoreDisplay framework not found in expected locations')
-except Exception as e:
-    logger.warning(f'Ошибка загрузки CoreDisplay framework: {e}')

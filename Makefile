@@ -28,10 +28,12 @@ run:
 
 rebuild: clean build
 
-install:
+install: build # Добавлено 'build' как зависимость, чтобы хелпер точно был скомпилирован перед установкой
 	@echo "Installing $(DISPLAY_NAME) to /Applications/"
 	cp -a $(APP_BUNDLE) $(INSTALL_PATH)
-	codesign --force --deep --sign - $(INSTALL_PATH)/$(APP_NAME).app
+	# Копируем скомпилированный хелпер внутрь бандла
+	cp coredisplay_helper $(INSTALL_PATH)/$(APP_NAME).app/Contents/MacOS/
+	codesign --force --deep --sign - $(INSTALL_PATH)/$(APP_NAME).app # Исправлена опечатка tcodesign -> codesign
 	@echo "Installed $(DISPLAY_NAME) to /Applications/"
 
 codesign:
