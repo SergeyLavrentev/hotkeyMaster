@@ -28,8 +28,15 @@ HOTKEYS_FILE = 'hotkeys.json'
 LOG_DIR = os.path.join(os.path.expanduser('~'), 'Library', 'Logs')
 LOG_FILE = os.path.join(LOG_DIR, 'HotkeyMaster.log')
 os.makedirs(LOG_DIR, exist_ok=True)
+
+# Определяем уровень логирования: DEBUG для разработки, INFO для production
+if getattr(sys, 'frozen', False):
+    log_level = logging.INFO
+else:
+    log_level = logging.DEBUG
+
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=log_level,
     format='[%(asctime)s] %(levelname)s: %(message)s',
     handlers=[
         logging.FileHandler(LOG_FILE, encoding='utf-8')
