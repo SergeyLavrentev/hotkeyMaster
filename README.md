@@ -16,6 +16,9 @@ HotkeyMaster is a native macOS application for creating global hotkeys and track
 - Settings stored in `hotkeys.json`
 - Native support for both Intel and Apple Silicon (macOS 12+)
 
+<img width="891" alt="image" src="https://github.com/user-attachments/assets/c6ecbec3-0f54-42c7-8e70-a78ef9acebf7" />
+
+
 ## Architecture
 - **main.py** — Application entry point, hotkey/gesture logic, tray integration
 - **ui.py** — PyQt5-based settings window for hotkeys and gestures
