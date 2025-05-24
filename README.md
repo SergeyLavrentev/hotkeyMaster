@@ -1,62 +1,82 @@
 # HotkeyMaster
 
-HotkeyMaster — это нативное приложение для macOS, позволяющее назначать глобальные хоткеи и жесты трекпада для управления приложениями и автоматизации действий.
+> **Note:** HotkeyMaster is an open source, free, and simpler alternative to BetterTouchTool for macOS. It provides essential hotkey and gesture automation features without the complexity or cost.
 
-## Основные возможности
-- Глобальные хоткеи для любых приложений
-- Поддержка трекпад-жестов (один, два, три, четыре пальца)
-- Действия: запуск программ, открытие сайтов, эмуляция хоткеев
-- Гибкая настройка через графический интерфейс
-- Иконка в системном трее (меню-баре)
-- Не отображается в Dock и Cmd+Tab (только трей)
-- Автоматическая перерегистрация хоткеев при изменении настроек
+HotkeyMaster is a native macOS application for creating global hotkeys and trackpad gestures to control apps and automate actions. It features a modern tray UI, flexible configuration, and deep system integration.
 
-## Архитектура
-- **main.py** — основной запуск, хоткей- и трекпад-логика, интеграция с треем
-- **ui.py** — PyQt5-интерфейс для настройки хоткеев и жестов
-- **trackpad_engine.py** — обработка жестов трекпада
-- **hotkeys.json** — хранение пользовательских хоткеев и жестов
-- **icons/** — иконки приложения и Info.plist для macOS .app
-- Используются PyQt5, pyobjc, pynput, pystray, pillow
+## Features
+- Global hotkeys for any application
+- Trackpad gesture support (1–4 fingers, tap and swipe)
+- Actions: launch apps, open URLs, emulate keypresses, run scripts
+- Flexible configuration via graphical interface (PyQt5)
+- Tray icon in the system menu bar (no Dock or Cmd+Tab presence)
+- Automatic hotkey re-registration on settings change
+- Autostart on login (via LaunchAgents)
+- Phantom tap filtering for reliable gesture detection
+- Settings stored in `hotkeys.json`
+- Native support for both Intel and Apple Silicon (macOS 12+)
 
-## Сборка и установка
+## Architecture
+- **main.py** — Application entry point, hotkey/gesture logic, tray integration
+- **ui.py** — PyQt5-based settings window for hotkeys and gestures
+- **trackpad_engine.py** — Multitouch gesture detection (via private MultitouchSupport.framework)
+- **hotkey_engine.py** — Global hotkey registration and action execution (Quartz, CoreDisplay)
+- **autolaunch.py** — Autostart management via LaunchAgents (plist in ~/Library/LaunchAgents)
+- **hotkeys.json** — User hotkey/gesture configuration
+- **icons/** — App icons and Info.plist for macOS bundle
+- **coredisplay_helper.c** — Helper for display brightness control (optional)
 
-### Требования
-- macOS (рекомендуется 12+)
+## Requirements
+- macOS 12 or later (Ventura/Sonoma recommended)
 - Python 3.12
-- Xcode Command Line Tools (для PyInstaller)
+- Xcode Command Line Tools (for PyInstaller build)
 
-### Быстрый старт
-1. Создать виртуальное окружение и установить зависимости:
+## Quick Start
+1. Create a virtual environment and install dependencies:
    ```sh
    make venv312
    source venv312/bin/activate
    ```
-2. Собрать приложение:
+2. Build the application:
    ```sh
    make build
    ```
-3. Установить в /Applications:
+3. Install to /Applications:
    ```sh
    make install
    ```
 
-### Запуск
-- После установки ищите HotkeyMaster в Spotlight или меню приложений.
-- Иконка появится в системном трее (меню-баре).
+## Running
+- After installation, launch HotkeyMaster from Spotlight or the Applications folder.
+- The icon will appear in the system menu bar (tray).
 
-### Настройка прав
-Для работы глобальных хоткеев требуется разрешить доступ к "Управлению компьютером":
-1. Откройте: Системные настройки → Конфиденциальность и безопасность → Универсальный доступ
-2. Добавьте HotkeyMaster и поставьте галочку
+## Accessibility Permissions
+Global hotkeys require "Accessibility" permissions:
+1. Open: System Settings → Privacy & Security → Accessibility
+2. Add HotkeyMaster and check the box
 
-## Разработка
-- Для запуска в dev-режиме:
+## Development
+- To run in development mode:
   ```sh
   source venv312/bin/activate
   make run
   ```
-- Все изменения хоткеев сохраняются в hotkeys.json
+- All hotkey/gesture changes are saved in `hotkeys.json`
 
-## Лицензия
+## Extending & Customization
+- Add new gestures (e.g., 5-finger tap) by editing `trackpad_engine.py`
+- Actions can be customized: app launch, URL open, key emulation, scripts
+- Tray menu and UI can be extended via `ui.py`
+
+## Troubleshooting & Limitations
+- Requires Accessibility permission for global hotkeys
+- Trackpad gestures use private APIs (may break in future macOS versions)
+- App is hidden from Dock and Cmd+Tab by default
+- For autostart, LaunchAgents plist is used (see `autolaunch.py`)
+- Known issue: Some system gestures may interfere with custom gestures (phantom tap filter reduces false positives)
+
+## Dependencies
+- PyQt5, pyobjc, pynput, pystray, pillow
+
+## License
 MIT
