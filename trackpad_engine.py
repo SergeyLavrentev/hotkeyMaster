@@ -57,12 +57,11 @@ class TrackpadGestureEngine:
         self._running = False
         self._gesture_timeout = 1.0  # Таймаут для принудительного сброса жеста (сек)
         self._last_activity_ts = None  # Последняя активность для отслеживания таймаута
-        
-        # Инициализация атрибутов для предотвращения race condition
         self._gesture_fingers = set()
         self._last_down = {}
         self._max_move = {}
         self._released_fingers = set()
+        self._finger_history = []  # история позиций пальцев для анти-свайп фильтра
 
     def start(self):
         dev_array = MT.MTDeviceCreateList()
@@ -206,7 +205,20 @@ class TrackpadGestureEngine:
                     dist = (dx**2 + dy**2) ** 0.5
                     if dist > max_dist:
                         max_dist = dist
-            if max_dist > MAX_DPOS:
+            # --- Новая фильтрация: анализируем перемещение каждого пальца за последние 3 кадра ---
+            moved_too_much = False
+            for f in fingers[:count]:
+                fid = f.identifier
+                # Собираем траекторию этого пальца за последние 3 кадра
+                traj = [frame[1].get(fid) for frame in self._finger_history if fid in frame[1]]
+                if len(traj) >= 2:
+                    x0, y0 = traj[0]
+                    x1, y1 = traj[-1]
+                    dtraj = ((x1 - x0)**2 + (y1 - y0)**2) ** 0.5
+                    if dtraj > MAX_DPOS:
+                        moved_too_much = True
+                        break
+            if max_dist > MAX_DPOS or moved_too_much:
                 return
             if (
                 self._last_phantom_tap_count == count and
