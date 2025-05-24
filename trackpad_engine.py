@@ -10,6 +10,32 @@ import os
 import subprocess
 import sys
 
+# ---
+# АНТИ-ФАНТОМНАЯ ФИЛЬТРАЦИЯ 3/4-FINGER TAP (PHANTOM TAP FILTER)
+#
+# Проблема:
+#   При системных свайпах трекпада (Mission Control, рабочие столы и т.п.)
+#   macOS генерирует последовательность событий, похожую на короткий тап тремя/четырьмя пальцами.
+#   Это приводило к ложным срабатываниям горячих клавиш (например, ⌘T/⌘W),
+#   хотя пользователь делал свайп, а не тап.
+#
+# Причина:
+#   Старый алгоритм определял тап только по количеству пальцев и короткой длительности касания,
+#   не учитывая траекторию и скорость движения пальцев.
+#
+# Решение (см. on_frame, блок PHANTOM TAP):
+#   1. Введён отдельный строгий порог смещения MAX_DPOS_SWIPE для фантомных тапов.
+#   2. Анализируется траектория каждого пальца за последние 7 кадров (SWIPE_TRAJ_WINDOW).
+#   3. Если хотя бы один палец сместился больше порога — событие не считается тапом.
+#   4. Если все пальцы двигались синхронно (разброс углов < 20°) — это свайп, не тап.
+#   5. Если скорость хотя бы одного пальца превышает порог — это свайп, не тап.
+#   6. Дебаунс по времени и количеству пальцев исключает повторные срабатывания.
+#
+# Итог:
+#   Фантомные срабатывания при OS-свайпах практически исключены,
+#   а настоящие короткие "тапы" по-прежнему надёжно распознаются.
+# ---
+
 # --- MultitouchSupport.framework ctypes binding ---
 def load_multitouch():
     try:
@@ -48,6 +74,10 @@ class Finger(ctypes.Structure):
 # --- Trackpad gesture detection logic ---
 MAX_DT = 0.25
 MAX_DPOS = 0.2  # Увеличено с 0.1 до 0.2 для более реалистичного порога движения
+MAX_DPOS_SWIPE = 0.07  # Новый, более строгий порог для анти-свайп фильтра
+SWIPE_TRAJ_WINDOW = 7  # Окно анализа траектории (кадров)
+MAX_SWIPE_SPEED = 1.2  # Максимальная скорость (норм.ед./сек) для тапа
+SYNC_ANGLE_THRESHOLD = 20  # градусы, допустимое расхождение направлений
 
 class TrackpadGestureEngine:
     def __init__(self, get_gesture_actions, run_action_func, get_active_app_name_func=None):
@@ -109,10 +139,8 @@ class TrackpadGestureEngine:
     def on_frame(self, dev, data, count, ts, frame):
         import logging
         logger = logging.getLogger("trackpad")
-        # Логируем все состояния пальцев в кадре и собираем уникальные state
         fingers = ctypes.cast(data, ctypes.POINTER(Finger))
-        # --- удалено подробное логирование пальцев и состояний ---
-        
+        # Логируем все состояния пальцев в кадре и собираем уникальные state
         fingers = ctypes.cast(data, ctypes.POINTER(Finger))
         # 1. Обновляем карту активных пальцев и сохраняем DOWN-координаты и максимальное смещение
         for i in range(count):
@@ -208,20 +236,38 @@ class TrackpadGestureEngine:
                     dist = (dx**2 + dy**2) ** 0.5
                     if dist > max_dist:
                         max_dist = dist
-            # --- Новая фильтрация: анализируем перемещение каждого пальца за последние 3 кадра ---
+            # --- Новая фильтрация: анализируем перемещение каждого пальца за последние SWIPE_TRAJ_WINDOW кадров ---
             moved_too_much = False
+            directions = []
+            speeds = []
             for f in fingers[:count]:
                 fid = f.identifier
-                # Собираем траекторию этого пальца за последние 3 кадра
-                traj = [frame[1].get(fid) for frame in self._finger_history if fid in frame[1]]
+                traj = [(t, fr[fid]) for t, fr in self._finger_history if fid in fr]
                 if len(traj) >= 2:
-                    x0, y0 = traj[0]
-                    x1, y1 = traj[-1]
+                    (t0, (x0, y0)), (t1, (x1, y1)) = traj[0], traj[-1]
                     dtraj = ((x1 - x0)**2 + (y1 - y0)**2) ** 0.5
-                    if dtraj > MAX_DPOS:
+                    dt = t1 - t0 if t1 > t0 else 1e-6
+                    speed = dtraj / dt
+                    speeds.append(speed)
+                    angle = None
+                    if dtraj > 1e-4:
+                        import math
+                        angle = math.degrees(math.atan2(y1 - y0, x1 - x0))
+                        directions.append(angle)
+                    if dtraj > MAX_DPOS_SWIPE:
                         moved_too_much = True
                         break
-            if max_dist > MAX_DPOS or moved_too_much:
+            # Проверка синхронности направления (характерно для свайпа)
+            sync = False
+            if len(directions) >= 2:
+                min_angle = min(directions)
+                max_angle = max(directions)
+                if abs(max_angle - min_angle) < SYNC_ANGLE_THRESHOLD:
+                    sync = True
+            # Проверка скорости
+            fast = any(s > MAX_SWIPE_SPEED for s in speeds)
+            if max_dist > MAX_DPOS_SWIPE or moved_too_much or sync or fast:
+                logger.debug(f"[PHANTOM] filtered: max_dist={max_dist:.3f}, moved_too_much={moved_too_much}, sync={sync}, fast={fast}, speeds={speeds}")
                 return
             if (
                 self._last_phantom_tap_count == count and
