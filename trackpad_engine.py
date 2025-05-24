@@ -44,7 +44,7 @@ class Finger(ctypes.Structure):
 
 # --- Trackpad gesture detection logic ---
 MAX_DT = 0.25
-MAX_DPOS = 0.03
+MAX_DPOS = 0.2  # Увеличено с 0.1 до 0.2 для более реалистичного порога движения
 
 class TrackpadGestureEngine:
     def __init__(self, get_gesture_actions, run_action_func, get_active_app_name_func=None):
@@ -55,6 +55,14 @@ class TrackpadGestureEngine:
         self.get_active_app_name = get_active_app_name_func
         self._cb = CB_TYPE(self.on_frame)
         self._running = False
+        self._gesture_timeout = 1.0  # Таймаут для принудительного сброса жеста (сек)
+        self._last_activity_ts = None  # Последняя активность для отслеживания таймаута
+        
+        # Инициализация атрибутов для предотвращения race condition
+        self._gesture_fingers = set()
+        self._last_down = {}
+        self._max_move = {}
+        self._released_fingers = set()
 
     def start(self):
         dev_array = MT.MTDeviceCreateList()
@@ -67,28 +75,108 @@ class TrackpadGestureEngine:
         threading.Thread(target=self._run, daemon=True).start()
 
     def _run(self):
+        import logging
+        logger = logging.getLogger("trackpad")
         while self._running:
-            time.sleep(1)
+            time.sleep(0.1)  # Проверяем каждые 100мс
+            # Проверка таймаута для принудительного сброса застрявших жестов
+            if (self._gesture_fingers and self._last_activity_ts and 
+                time.time() - self._last_activity_ts > self._gesture_timeout):
+                logger.debug(f"[TIMEOUT] Forcing gesture reset after {self._gesture_timeout}s of inactivity")
+                logger.debug(f"[TIMEOUT] Active fingers before reset: {list(self._active.keys())}")
+                logger.debug(f"[TIMEOUT] Gesture fingers before reset: {list(self._gesture_fingers)}")
+                # Принудительный сброс состояния
+                self._reset_gesture_state()
+                logger.debug(f"[TIMEOUT] Gesture state reset complete")
 
     def stop(self):
         self._running = False
 
+    def _reset_gesture_state(self, reason=None):
+        import logging
+        logger = logging.getLogger("trackpad")
+        logger.debug(f"[RESET_GESTURE_STATE] called. Reason: {reason if reason else 'unspecified'}")
+        self.start_ts = None
+        self._last_activity_ts = None
+        self._last_down = {}
+        self._max_move = {}
+        self._gesture_fingers = set()
+        self._released_fingers = set()
+        self._active = {}
+
     def on_frame(self, dev, data, count, ts, frame):
+        import logging
+        logger = logging.getLogger("trackpad")
+        # Логируем все состояния пальцев в кадре и собираем уникальные state
         fingers = ctypes.cast(data, ctypes.POINTER(Finger))
-        # 1. Обновляем карту активных пальцев
+        # --- удалено подробное логирование пальцев и состояний ---
+        
+        fingers = ctypes.cast(data, ctypes.POINTER(Finger))
+        # 1. Обновляем карту активных пальцев и сохраняем DOWN-координаты и максимальное смещение
         for i in range(count):
             f = fingers[i]
             if f.state == 1:  # DOWN
-                self._active[f.identifier] = (f.norm.pos.x, f.norm.pos.y, ts)
-                self.start_ts = self.start_ts or ts
+                self._gesture_fingers.add(f.identifier)
+                if self.start_ts is None:
+                    self.start_ts = ts
+                if f.identifier not in self._active:
+                    self._active[f.identifier] = (f.norm.pos.x, f.norm.pos.y, ts)
+                    self._last_down[f.identifier] = (f.norm.pos.x, f.norm.pos.y)
+                    self._max_move[f.identifier] = 0.0
+                self._last_activity_ts = time.time()
+            elif f.state == 2:  # MOVE
+                if f.identifier in self._last_down:
+                    x0, y0 = self._last_down[f.identifier]
+                    dx = abs(f.norm.pos.x - x0)
+                    dy = abs(f.norm.pos.y - y0)
+                    dist = (dx ** 2 + dy ** 2) ** 0.5
+                    self._max_move[f.identifier] = max(self._max_move.get(f.identifier, 0.0), dist)
+                    self._last_activity_ts = time.time()
             elif f.state == 4:  # UP
+                if f.identifier in self._released_fingers:
+                    continue
+                if f.identifier not in self._gesture_fingers:
+                    continue
                 self._active.pop(f.identifier, None)
-        # 2. Если пальцев не осталось — решаем, был ли это tap
-        if not self._active and self.start_ts is not None:
+                self._released_fingers.add(f.identifier)
+                self._last_activity_ts = time.time()
+                if f.identifier in self._last_down:
+                    x0, y0 = self._last_down[f.identifier]
+                    current_x, current_y = f.norm.pos.x, f.norm.pos.y
+                    dx = abs(current_x - x0)
+                    dy = abs(current_y - y0)
+                    dist = (dx ** 2 + dy ** 2) ** 0.5
+                    self._max_move[f.identifier] = max(self._max_move.get(f.identifier, 0.0), dist)
+        # --- СИНТЕТИЧЕСКИЙ UP: если палец исчез из кадра, считаем его отпущенным ---
+        current_ids = set(fingers[i].identifier for i in range(count))
+        previously_active = set(self._active.keys())
+        disappeared = previously_active - current_ids
+        for fid in disappeared:
+            if fid in self._released_fingers:
+                continue
+            self._active.pop(fid, None)
+            self._released_fingers.add(fid)
+            self._last_activity_ts = time.time()
+            if fid in self._last_down:
+                x0, y0 = self._last_down[fid]
+                current_x, current_y = x0, y0
+                dx = abs(current_x - x0)
+                dy = abs(current_y - y0)
+                dist = (dx ** 2 + dy ** 2) ** 0.5
+                self._max_move[fid] = max(self._max_move.get(fid, 0.0), dist)
+        # 2. Анализ жеста когда все пальцы отпущены (активных пальцев = 0) 
+        # ИЛИ когда все пальцы из gesture_fingers получили UP события
+        gesture_complete = (self._gesture_fingers and len(self._active) == 0) or \
+                          (self._gesture_fingers and 
+                           all(fid in self._released_fingers for fid in self._gesture_fingers))
+        any_down_or_move = any(f.state in (1,2) for f in fingers[:count])
+        if gesture_complete and self.start_ts is not None and not any_down_or_move:
             duration = ts - self.start_ts
-            nfingers = count
+            nfingers = len(self._gesture_fingers)
             gesture_name = None
-            if duration <= MAX_DT:
+            max_moves = [self._max_move.get(fid, 0.0) for fid in self._gesture_fingers]
+            is_tap = all(mv <= MAX_DPOS for mv in max_moves)
+            if duration <= MAX_DT and is_tap:
                 if nfingers == 1:
                     gesture_name = 'Тап одним пальцем'
                 elif nfingers == 2:
@@ -99,16 +187,65 @@ class TrackpadGestureEngine:
                     gesture_name = 'Тап четырьмя пальцами'
             if gesture_name:
                 self.handle_gesture(gesture_name)
-            self.start_ts = None
+            self._reset_gesture_state(reason="gesture_complete (all fingers UP)")
+
+        # --- PHANTOM TAP: если только UP, но их 3 или 4, и нет активных пальцев/жеста ---
+        if not hasattr(self, '_last_phantom_tap_ts'):
+            self._last_phantom_tap_ts = 0
+            self._last_phantom_tap_count = 0
+        only_ups = all(f.state == 4 for f in fingers[:count])
+        now = time.time()
+        debounce_time = 0.3
+        if only_ups and count in (3, 4) and not self._active and not self._gesture_fingers:
+            positions = [(f.norm.pos.x, f.norm.pos.y) for f in fingers[:count]]
+            max_dist = 0.0
+            for i in range(len(positions)):
+                for j in range(i+1, len(positions)):
+                    dx = positions[i][0] - positions[j][0]
+                    dy = positions[i][1] - positions[j][1]
+                    dist = (dx**2 + dy**2) ** 0.5
+                    if dist > max_dist:
+                        max_dist = dist
+            if max_dist > MAX_DPOS:
+                return
+            if (
+                self._last_phantom_tap_count == count and
+                now - self._last_phantom_tap_ts < debounce_time
+            ):
+                return
+            gesture_name = None
+            if count == 3:
+                gesture_name = 'Тап тремя пальцами'
+            elif count == 4:
+                gesture_name = 'Тап четырьмя пальцами'
+            if gesture_name:
+                self.handle_gesture(gesture_name)
+                self._reset_gesture_state(reason="phantom_tap (all UP, no DOWN)")
+                self._last_phantom_tap_ts = now
+                self._last_phantom_tap_count = count
+            return
 
     def handle_gesture(self, gesture_name):
+        import logging
+        logger = logging.getLogger("trackpad")
+        logger.debug(f"[GESTURE] handle_gesture called with: {gesture_name}")
+        
         actions = self.get_gesture_actions()
+        logger.debug(f"[GESTURE] Found {len(actions)} total actions")
+        
+        matching_actions = [hk for hk in actions if hk.get('type') == 'trackpad' and hk.get('gesture') == gesture_name]
+        logger.debug(f"[GESTURE] Found {len(matching_actions)} matching trackpad actions for '{gesture_name}'")
+        
         for hk in actions:
             if hk.get('type') == 'trackpad' and hk.get('gesture') == gesture_name:
+                logger.debug(f"[GESTURE] Processing action: {hk}")
                 scope = hk.get('scope', 'global')
                 app = hk.get('app', '')
                 if scope == 'app' and app and self.get_active_app_name:
                     active_app = self.get_active_app_name()
+                    logger.debug(f"[GESTURE] App scope check: need={app}, active={active_app}")
                     if not active_app or app not in active_app:
+                        logger.debug(f"[GESTURE] Skipping action - app mismatch")
                         continue
+                logger.debug(f"[GESTURE] Executing action: {hk.get('action')}")
                 self.run_action(hk.get('action'))

@@ -2,6 +2,9 @@ import sys
 import json
 import threading
 import Quartz
+import logging
+
+logger = logging.getLogger('hotkeymaster.capture_helper')
 
 def main():
     result = {}
@@ -39,7 +42,7 @@ def main():
         None
     )
     if not tap:
-        print(json.dumps({'error': 'CGEventTapCreate failed'}))
+        logger.error(json.dumps({'error': 'CGEventTapCreate failed'}))
         sys.exit(1)
     run_loop_source = Quartz.CFMachPortCreateRunLoopSource(None, tap, 0)
     loop = Quartz.CFRunLoopGetCurrent()
@@ -48,7 +51,7 @@ def main():
     # Ждём нажатия
     while not captured.is_set():
         Quartz.CFRunLoopRunInMode(Quartz.kCFRunLoopDefaultMode, 0.1, False)
-    print(json.dumps(result))
+    logger.info(json.dumps(result))
     sys.exit(0)
 
 if __name__ == '__main__':

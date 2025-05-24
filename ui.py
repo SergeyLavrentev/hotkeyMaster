@@ -6,6 +6,9 @@ import Quartz
 import subprocess
 import json
 import sip
+import logging
+
+logger = logging.getLogger('hotkeymaster.ui')
 
 # Сопоставление Qt keycode → pynput vk для букв и цифр (macOS)
 def qtkey_to_pynput_vk(qt_vk):
@@ -492,7 +495,7 @@ class SettingsWindow(QtWidgets.QDialog):
             # Если строка изменилась с момента создания виджета, не сохраняем
             # (это предотвратит сохранение при быстром переключении строк)
             if self.hotkey_list.currentRow() != detail_row:
-                 print(f"Предотвращено сохранение для строки {detail_row}, текущая строка {self.hotkey_list.currentRow()}")
+                 logger.debug(f"Предотвращено сохранение для строки {detail_row}, текущая строка {self.hotkey_list.currentRow()}")
                  return
             # --- Конец проверки ---
 
@@ -507,7 +510,7 @@ class SettingsWindow(QtWidgets.QDialog):
                      break
 
             if current_hk_index == -1:
-                print("Ошибка: Не удалось найти редактируемый хоткей в списке.")
+                logger.warning("Ошибка: Не удалось найти редактируемый хоткей в списке.")
                 # Попробуем найти по индексу в отфильтрованном списке, если сравнение словарей не сработало
                 # Это менее надежно, но может помочь в некоторых случаях
                 if 0 <= detail_row < len(self._filtered):
@@ -515,10 +518,10 @@ class SettingsWindow(QtWidgets.QDialog):
                     for i, h in enumerate(hotkeys):
                         if h == hk_to_find:
                             current_hk_index = i
-                            print(f"Найден хоткей по индексу {detail_row} в отфильтрованном списке.")
+                            logger.info(f"Найден хоткей по индексу {detail_row} в отфильтрованном списке.")
                             break
                 if current_hk_index == -1:
-                    print("Повторная попытка найти хоткей не удалась.")
+                    logger.warning("Повторная попытка найти хоткей не удалась.")
                     return # Не нашли хоткей, ничего не делаем
 
             original_hk = hotkeys[current_hk_index]  # Сохраняем оригинал для отката
@@ -580,10 +583,10 @@ class SettingsWindow(QtWidgets.QDialog):
                             if original_action.startswith('hotkey:'):
                                 action = original_action
                             else:
-                                print("Ошибка: Невалидный хоткей для действия 'Нажать хоткей'")
+                                logger.error("Ошибка: Невалидный хоткей для действия 'Нажать хоткей'")
                                 action = '' # Сбрасываем действие
                     else:
-                         print("Ошибка: Не найден виджет HotkeyInput для действия 'Нажать хоткей'")
+                         logger.error("Ошибка: Не найден виджет HotkeyInput для действия 'Нажать хоткей'")
                          action = ''
                 elif action_idx == 3: # Установить яркость
                     action = f'brightness_set {brightness_input.value()}'
@@ -620,12 +623,12 @@ class SettingsWindow(QtWidgets.QDialog):
                         item.setCheckState(QtCore.Qt.Checked if is_enabled else QtCore.Qt.Unchecked)
                         item.setForeground(QtGui.QBrush(QtGui.QColor('black' if is_enabled else 'gray')))
 
-                    print("Хоткей успешно сохранен. Перерегистрация произойдет автоматически.")
+                    logger.info("Хоткей успешно сохранен. Перерегистрация произойдет автоматически.")
                 else:
-                    print("Изменений для сохранения не обнаружено.")
+                    logger.debug("Изменений для сохранения не обнаружено.")
 
             except Exception as save_err:
-                 print(f"Критическая ошибка при сохранении изменений хоткея: {save_err}")
+                 logger.error(f"Критическая ошибка при сохранении изменений хоткея: {save_err}")
                  import traceback
                  traceback.print_exc()
         # --- КОНЕЦ ОПРЕДЕЛЕНИЯ save_changes ---
@@ -959,7 +962,7 @@ class SettingsWindow(QtWidgets.QDialog):
                 break
         self.save_hotkeys(hotkeys)
         self.update_hotkey_list(idx)
-        print("Хоткей удален. Перерегистрация произойдет автоматически.") # Убрали прямой вызов register_hotkeys
+        logger.info("Хоткей удален. Перерегистрация произойдет автоматически.") # Убрали прямой вызов register_hotkeys
         # try:
         #     import main
         #     main.register_hotkeys() # <--- УДАЛЕНО
@@ -1120,7 +1123,7 @@ class SettingsWindow(QtWidgets.QDialog):
                 'enabled': True
             })
             self.save_hotkeys(hotkeys)
-            print("Новый клавиатурный хоткей добавлен.")
+            logger.info("Новый клавиатурный хоткей добавлен.")
 
     def _add_trackpad_hotkey(self):
         dlg = QtWidgets.QDialog(self)
@@ -1184,7 +1187,7 @@ class SettingsWindow(QtWidgets.QDialog):
                 hotkeys = self.load_hotkeys()
                 hotkeys.append({'type': 'trackpad', 'combo': None, 'gesture': gesture, 'action': action, 'scope': scope, 'app': app})
                 self.save_hotkeys(hotkeys)
-                print("Трекпад-жест добавлен. Перерегистрация произойдет автоматически.") # Убрали прямой вызов register_hotkeys
+                logger.info("Трекпад-жест добавлен. Перерегистрация произойдет автоматически.") # Убрали прямой вызов register_hotkeys
                 # try:
                 #     import main
                 #     main.register_hotkeys() # <--- УДАЛЕНО
@@ -1275,7 +1278,7 @@ class SettingsWindow(QtWidgets.QDialog):
                         hotkeys[i] = {'type': 'keyboard', 'combo': combo, 'gesture': '', 'action': action, 'scope': scope, 'app': app}
                         break
                 self.save_hotkeys(hotkeys)
-                print("Клавиатурный хоткей изменен. Перерегистрация произойдет автоматически.") # Убрали прямой вызов register_hotkeys
+                logger.info("Клавиатурный хоткей изменен. Перерегистрация произойдет автоматически.") # Убрали прямой вызов register_hotkeys
                 # try:
                 #     import main
                 #     main.register_hotkeys() # <--- УДАЛЕНО
@@ -1369,7 +1372,7 @@ class SettingsWindow(QtWidgets.QDialog):
                         hotkeys[i] = {'type': 'trackpad', 'combo': None, 'gesture': gesture, 'action': action, 'scope': scope, 'app': app}
                         break
                 self.save_hotkeys(hotkeys)
-                print("Трекпад-жест изменен. Перерегистрация произойдет автоматически.") # Убрали прямой вызов register_hotkeys
+                logger.info("Трекпад-жест изменен. Перерегистрация произойдет автоматически.") # Убрали прямой вызов register_hotkeys
                 # try:
                 #     import main
                 #     main.register_hotkeys() # <--- УДАЛЕНО

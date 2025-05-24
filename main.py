@@ -229,7 +229,7 @@ def main():
     # Основной режим работы
     logger.info("Running in normal mode.")
     if is_another_instance_running():
-        print('HotkeyMaster уже запущен.')
+        logger.warning('HotkeyMaster уже запущен.')
         logger.warning("Another instance is running. Exiting.")
         sys.exit(0)
 

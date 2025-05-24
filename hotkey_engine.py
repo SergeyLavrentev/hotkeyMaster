@@ -116,6 +116,8 @@ def get_active_app_name():
 
 def run_action(action):
     logger.info(f"Выполнение действия: {action}")
+    import os
+    logger.info(f"Текущий UID: {os.getuid()}, GID: {os.getgid()}")
     if action.startswith('open '):
         url = action[len('open '):].strip()
         if not url.startswith('http://') and not url.startswith('https://'):
@@ -155,14 +157,15 @@ def run_action(action):
         try:
             percent = int(action.split()[1])
             val = max(0.0, min(1.0, percent / 100.0))
-            # Используем определенный ранее helper_path
             if os.path.exists(helper_path) and os.access(helper_path, os.X_OK):
                 logger.debug(f"Запуск хелпера: {helper_path} {val}")
                 result = subprocess.run([helper_path, str(val)], check=True, capture_output=True, text=True)
-                logger.debug(f"Хелпер выполнен. Output: {result.stdout} Stderr: {result.stderr}")
+                logger.info(f"stdout: {result.stdout}")
+                logger.info(f"stderr: {result.stderr}")
+                logger.info(f"returncode: {result.returncode}")
                 return
             else:
-                 logger.warning(f"Хелпер не найден или недоступен: {helper_path}. Попытка fallback...")
+                logger.warning(f"Хелпер не найден или недоступен: {helper_path}. Попытка fallback...")
             # Fallback: Если хелпер не найден/не сработал, пробуем старые методы
             if CoreDisplay_Display_SetUserBrightness:
                 disp = CGMainDisplayID()
@@ -172,21 +175,22 @@ def run_action(action):
                 return
             set_display_brightness(val) # IOKit fallback
         except subprocess.CalledProcessError as e:
-             logger.error(f"Ошибка выполнения хелпера: {e}. Output: {e.stdout}. Stderr: {e.stderr}")
+            logger.error(f"Ошибка выполнения хелпера: {e}. Output: {e.stdout}. Stderr: {e.stderr}")
         except Exception as e:
             logger.error(f'Ошибка установки яркости: {e}')
     elif action == 'brightness_up':
         try:
             cur = get_display_brightness()
             new_val = min(1.0, cur + 0.1)
-             # Используем определенный ранее helper_path
             if os.path.exists(helper_path) and os.access(helper_path, os.X_OK):
                 logger.debug(f"Запуск хелпера: {helper_path} {new_val}")
                 result = subprocess.run([helper_path, str(new_val)], check=True, capture_output=True, text=True)
-                logger.debug(f"Хелпер выполнен. Output: {result.stdout} Stderr: {result.stderr}")
+                logger.info(f"stdout: {result.stdout}")
+                logger.info(f"stderr: {result.stderr}")
+                logger.info(f"returncode: {result.returncode}")
                 return
             else:
-                 logger.warning(f"Хелпер не найден или недоступен: {helper_path}. Попытка fallback...")
+                logger.warning(f"Хелпер не найден или недоступен: {helper_path}. Попытка fallback...")
             # Fallback
             if CoreDisplay_Display_SetUserBrightness:
                 disp = CGMainDisplayID()
@@ -196,21 +200,22 @@ def run_action(action):
                 return
             set_display_brightness(new_val) # IOKit fallback
         except subprocess.CalledProcessError as e:
-             logger.error(f"Ошибка выполнения хелпера: {e}. Output: {e.stdout}. Stderr: {e.stderr}")
+            logger.error(f"Ошибка выполнения хелпера: {e}. Output: {e.stdout}. Stderr: {e.stderr}")
         except Exception as e:
             logger.error(f'Ошибка увеличения яркости: {e}')
     elif action == 'brightness_down':
         try:
             cur = get_display_brightness()
             new_val = max(0.0, cur - 0.1)
-             # Используем определенный ранее helper_path
             if os.path.exists(helper_path) and os.access(helper_path, os.X_OK):
                 logger.debug(f"Запуск хелпера: {helper_path} {new_val}")
                 result = subprocess.run([helper_path, str(new_val)], check=True, capture_output=True, text=True)
-                logger.debug(f"Хелпер выполнен. Output: {result.stdout} Stderr: {result.stderr}")
+                logger.info(f"stdout: {result.stdout}")
+                logger.info(f"stderr: {result.stderr}")
+                logger.info(f"returncode: {result.returncode}")
                 return
             else:
-                 logger.warning(f"Хелпер не найден или недоступен: {helper_path}. Попытка fallback...")
+                logger.warning(f"Хелпер не найден или недоступен: {helper_path}. Попытка fallback...")
             # Fallback
             if CoreDisplay_Display_SetUserBrightness:
                 disp = CGMainDisplayID()
@@ -220,7 +225,7 @@ def run_action(action):
                 return
             set_display_brightness(new_val) # IOKit fallback
         except subprocess.CalledProcessError as e:
-             logger.error(f"Ошибка выполнения хелпера: {e}. Output: {e.stdout}. Stderr: {e.stderr}")
+            logger.error(f"Ошибка выполнения хелпера: {e}. Output: {e.stdout}. Stderr: {e.stderr}")
         except Exception as e:
             logger.error(f'Ошибка уменьшения яркости: {e}')
     else:
