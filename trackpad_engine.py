@@ -6,6 +6,9 @@ from Quartz import (
     CGEventCreateKeyboardEvent, CGEventSetFlags,
     CGEventPost, kCGHIDEventTap, kCGEventFlagMaskCommand,
 )
+import os
+import subprocess
+import sys
 
 # --- MultitouchSupport.framework ctypes binding ---
 def load_multitouch():

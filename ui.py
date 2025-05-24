@@ -167,7 +167,7 @@ class HotkeyInput(QtWidgets.QLineEdit):
                  # Если обработка прошла и текст изменился, можно вызвать колбэк
                  # Но т.к. поле ReadOnly, просто передаем дальше
                  pass
-            # --- КОНЕЦ ИЗМЕНЕНИЯ ---
+            # --- КОНЕЦ ИЗМЕНЕНИЯ---
             return super().keyPressEvent(event)
 
         # Отмена ввода по Esc: восстанавливаем старую комбинацию во время захвата
@@ -1382,15 +1382,22 @@ class SettingsWindow(QtWidgets.QDialog):
     def load_general_settings(self):
         import os, json
         path = os.path.join(os.path.expanduser('~'), 'Library', 'Application Support', 'HotkeyMaster', 'settings.json')
+        # --- Проверка реального состояния автозапуска через AutoLaunchManager ---
+        try:
+            from autolaunch import AutoLaunchManager
+            actual_enabled = AutoLaunchManager.is_autolaunch_enabled()
+        except Exception:
+            actual_enabled = False
         if os.path.exists(path):
             try:
                 with open(path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
-                self.autostart_cb.setChecked(data.get('autostart', False))
+                # Если в настройках и в системе не совпадает — доверяем системе
+                self.autostart_cb.setChecked(actual_enabled)
             except Exception:
-                pass
+                self.autostart_cb.setChecked(actual_enabled)
         else:
-            self.autostart_cb.setChecked(False)
+            self.autostart_cb.setChecked(actual_enabled)
 
     def save_general_settings(self):
         import os, json
@@ -1410,26 +1417,28 @@ class SettingsWindow(QtWidgets.QDialog):
             self.disable_autostart()
 
     def enable_autostart(self):
-        import subprocess, os
-        app_path = os.path.abspath(sys.argv[0])
-        script = f'''osascript -e 'tell application "System Events" to make login item at end with properties {{path:"{app_path}", hidden:false}}'''
         try:
-            subprocess.run(script, shell=True)
-        except Exception:
+            from autolaunch import AutoLaunchManager
+            AutoLaunchManager.enable_autolaunch()
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
             pass
 
     def disable_autostart(self):
-        import subprocess
-        script = '''osascript -e 'tell application "System Events" to delete login item "HotkeyMaster"' '''
         try:
-            subprocess.run(script, shell=True)
-        except Exception:
+            from autolaunch import AutoLaunchManager
+            AutoLaunchManager.disable_autolaunch()
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
             pass
 
 def show_settings_window(load_hotkeys, save_hotkeys):
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
     win = SettingsWindow(load_hotkeys, save_hotkeys)
     win.setWindowModality(QtCore.Qt.ApplicationModal)
+
     # Показываем и поднимаем окно в передний план
     win.show()
     win.raise_()
