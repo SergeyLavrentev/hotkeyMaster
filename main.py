@@ -20,8 +20,10 @@ from Foundation import NSObject
 from objc import selector
 
 from hotkey_engine import (
-    load_hotkeys, save_hotkeys, run_action, get_active_app_name, start_quartz_hotkey_listener
+    load_hotkeys, save_hotkeys, run_action, get_active_app_name, start_quartz_hotkey_listener,
+    stop_quartz_hotkey_listener, restart_quartz_hotkey_listener
 )
+from sleep_wake_monitor import get_sleep_wake_monitor
 
 HOTKEYS_FILE = 'hotkeys.json'
 # --- Настройка логирования только в файл ---
@@ -198,7 +200,20 @@ def is_another_instance_running():
 # Убедимся, что при выходе все слушатели останавливаются
 def cleanup_listeners():
     logger.info("Cleaning up listeners before exit...")
-    # Останавливаем все
+    try:
+        stop_quartz_hotkey_listener()
+    except Exception as e:
+        logger.error(f"Ошибка остановки hotkey listener: {e}")
+    
+    # Остановим trackpad engine, если он есть в глобальной области
+    try:
+        import gc
+        for obj in gc.get_objects():
+            if isinstance(obj, TrackpadGestureEngine):
+                obj.stop()
+                break
+    except Exception as e:
+        logger.error(f"Ошибка остановки trackpad engine: {e}")
 
 def load_general_settings():
     import os, json
@@ -268,6 +283,48 @@ def main():
         logger.info("Trackpad engine started.")
     except Exception as e:
         logger.error(f'Ошибка запуска трекпад-движка: {e}')
+    
+    # --- Настройка мониторинга сна/пробуждения ---
+    sleep_monitor = get_sleep_wake_monitor()
+    
+    # Обработчики событий сна/пробуждения
+    def on_system_will_sleep():
+        logger.info("Система засыпает - готовимся к остановке слушателей")
+        
+    def on_system_did_wake():
+        logger.info("Система проснулась - перезапускаем слушатели")
+        try:
+            # Перезапускаем hotkey listener
+            restart_quartz_hotkey_listener()
+            
+            # Перезапускаем trackpad engine
+            if trackpad_engine:
+                trackpad_engine.restart()
+                
+            logger.info("Все слушатели успешно перезапущены после пробуждения")
+        except Exception as e:
+            logger.error(f"Ошибка перезапуска слушателей после пробуждения: {e}")
+    
+    # Подключаем обработчики
+    sleep_monitor.add_sleep_callback(on_system_will_sleep)
+    sleep_monitor.add_wake_callback(on_system_did_wake)
+    
+    # Запускаем мониторинг
+    try:
+        sleep_monitor.start_monitoring()
+        logger.info("Мониторинг сна/пробуждения запущен")
+    except Exception as e:
+        logger.error(f"Ошибка запуска мониторинга сна/пробуждения: {e}")
+    
+    # Убедимся, что мониторинг останавливается при выходе
+    def cleanup_sleep_monitor():
+        try:
+            sleep_monitor.stop_monitoring()
+            logger.info("Мониторинг сна/пробуждения остановлен")
+        except Exception as e:
+            logger.error(f"Ошибка остановки мониторинга: {e}")
+    
+    atexit.register(cleanup_sleep_monitor)
 
     # --- Показывать/скрывать трей ---
     tray_icon = create_tray_qt(app)

@@ -5,6 +5,7 @@ import logging # Убедимся, что logging импортирован
 import ctypes # Убедимся, что ctypes импортирован
 import threading # Добавляем импорт threading
 import json # Добавляем импорт json
+import time # Добавляем импорт time
 import Quartz
 from PyQt5 import QtWidgets
 from Quartz import CGMainDisplayID, CGEventPost, kCGHIDEventTap, CGEventCreateKeyboardEvent, CGEventSetFlags, kCGEventFlagMaskShift, kCGEventFlagMaskControl, kCGEventFlagMaskAlternate, kCGEventFlagMaskCommand
@@ -231,11 +232,53 @@ def run_action(action):
     else:
         logger.warning(f'Неизвестное действие: {action}')
 
+# --- Глобальные переменные для управления слушателем ---
+_hotkey_listener_thread = None
+_hotkey_listener_stop_event = threading.Event()
+_hotkey_tap = None
+_hotkey_run_loop_source = None
+
 # --- Quartz глобальный слушатель ---
 def start_quartz_hotkey_listener():
     import Quartz
     import AppKit
     from PyQt5.QtCore import QCoreApplication
+    global _hotkey_listener_thread
+    
+    # Если слушатель уже запущен, останавливаем его
+    if _hotkey_listener_thread and _hotkey_listener_thread.is_alive():
+        stop_quartz_hotkey_listener()
+        
+    _hotkey_listener_stop_event.clear()
+    _hotkey_listener_thread = threading.Thread(target=_run_hotkey_listener, name="QuartzHotkeyThread", daemon=True)
+    _hotkey_listener_thread.start()
+    logger.info("Запуск нового Quartz hotkey listener thread")
+
+def stop_quartz_hotkey_listener():
+    """Остановить слушатель хоткеев"""
+    global _hotkey_listener_thread, _hotkey_tap, _hotkey_run_loop_source
+    
+    logger.info("Остановка Quartz hotkey listener...")
+    _hotkey_listener_stop_event.set()
+    
+    if _hotkey_listener_thread and _hotkey_listener_thread.is_alive():
+        _hotkey_listener_thread.join(timeout=2.0)
+        
+    _hotkey_listener_thread = None
+    _hotkey_tap = None
+    _hotkey_run_loop_source = None
+
+def restart_quartz_hotkey_listener():
+    """Перезапустить слушатель хоткеев"""
+    logger.info("Перезапуск Quartz hotkey listener после пробуждения...")
+    stop_quartz_hotkey_listener()
+    time.sleep(0.5)  # Небольшая пауза
+    start_quartz_hotkey_listener()
+
+def _run_hotkey_listener():
+    """Основная функция слушателя хоткеев"""
+    import Quartz
+    
     MODS_MAP = {
         Quartz.kCGEventFlagMaskCommand: 'Cmd',
         Quartz.kCGEventFlagMaskShift: 'Shift',
@@ -248,7 +291,13 @@ def start_quartz_hotkey_listener():
             if flags & mask:
                 mods.add(name)
         return mods
+        
     def event_callback(proxy, type_, event, refcon):
+        # Проверяем, не был ли event tap отключен
+        if not Quartz.CGEventTapIsEnabled(_hotkey_tap):
+            logger.warning("CGEventTap был отключен, пытаемся включить обратно...")
+            Quartz.CGEventTapEnable(_hotkey_tap, True)
+            return event
         if type_ != Quartz.kCGEventKeyDown:
             return event
         vk = Quartz.CGEventGetIntegerValueField(event, Quartz.kCGKeyboardEventKeycode)
@@ -277,23 +326,52 @@ def start_quartz_hotkey_listener():
                 run_action(hk.get('action', ''))
                 break
         return event
-    def run_event_loop():
-        mask = Quartz.CGEventMaskBit(Quartz.kCGEventKeyDown)
-        tap = Quartz.CGEventTapCreate(
-            Quartz.kCGHIDEventTap,  # use HID tap for global key events
-            Quartz.kCGHeadInsertEventTap,
-            Quartz.kCGEventTapOptionDefault,
-            mask,
-            event_callback,
-            None
-        )
-        if not tap:
-            logger.error('Не удалось создать CGEventTap. Проверьте права Accessibility!')
-            return
-        run_loop_source = Quartz.CFMachPortCreateRunLoopSource(None, tap, 0)
-        loop = Quartz.CFRunLoopGetCurrent()
-        Quartz.CFRunLoopAddSource(loop, run_loop_source, Quartz.kCFRunLoopCommonModes)
-        Quartz.CGEventTapEnable(tap, True)
-        logger.info('Quartz hotkey listener started.')
-        Quartz.CFRunLoopRun()
-    threading.Thread(target=run_event_loop, name="QuartzHotkeyThread", daemon=True).start()
+    
+    # Создаем event tap
+    global _hotkey_tap, _hotkey_run_loop_source
+    
+    mask = Quartz.CGEventMaskBit(Quartz.kCGEventKeyDown)
+    _hotkey_tap = Quartz.CGEventTapCreate(
+        Quartz.kCGHIDEventTap,  # use HID tap for global key events
+        Quartz.kCGHeadInsertEventTap,
+        Quartz.kCGEventTapOptionDefault,
+        mask,
+        event_callback,
+        None
+    )
+    
+    if not _hotkey_tap:
+        logger.error('Не удалось создать CGEventTap. Проверьте права Accessibility!')
+        return
+        
+    _hotkey_run_loop_source = Quartz.CFMachPortCreateRunLoopSource(None, _hotkey_tap, 0)
+    loop = Quartz.CFRunLoopGetCurrent()
+    Quartz.CFRunLoopAddSource(loop, _hotkey_run_loop_source, Quartz.kCFRunLoopCommonModes)
+    Quartz.CGEventTapEnable(_hotkey_tap, True)
+    logger.info('Quartz hotkey listener started.')
+    
+    # Запускаем run loop с проверкой на остановку
+    while not _hotkey_listener_stop_event.is_set():
+        try:
+            # Используем короткие интервалы для возможности проверки stop_event
+            Quartz.CFRunLoopRunInMode(Quartz.kCFRunLoopDefaultMode, 0.1, False)
+            
+            # Периодически проверяем состояние event tap
+            if _hotkey_tap and not Quartz.CGEventTapIsEnabled(_hotkey_tap):
+                logger.warning("CGEventTap отключен, пытаемся включить...")
+                Quartz.CGEventTapEnable(_hotkey_tap, True)
+                
+        except Exception as e:
+            logger.error(f"Ошибка в run loop: {e}")
+            break
+    
+    # Очистка ресурсов
+    try:
+        if _hotkey_run_loop_source and loop:
+            Quartz.CFRunLoopRemoveSource(loop, _hotkey_run_loop_source, Quartz.kCFRunLoopCommonModes)
+        if _hotkey_tap:
+            Quartz.CFMachPortInvalidate(_hotkey_tap)
+    except Exception as e:
+        logger.error(f"Ошибка при очистке ресурсов: {e}")
+        
+    logger.info('Quartz hotkey listener stopped.')

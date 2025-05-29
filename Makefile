@@ -6,10 +6,10 @@ SPEC_FILE=hotkeymaster.spec
 DIST_DIR=dist
 BUILD_DIR=build
 APP_BUNDLE=$(DIST_DIR)/$(APP_NAME).app
-INSTALL_PATH=/Applications/
+INSTALL_PATH=/Applications
 PYTHON=python3.12
 
-SIGN_IDENTITY="Developer ID Application: Rocker (TEAMID)"  # Замени на свой identity
+SIGN_IDENTITY=Developer ID Application: Rocker (TEAMID)
 
 build:
 	clang -F /System/Library/PrivateFrameworks \
@@ -29,12 +29,12 @@ run:
 rebuild: clean build
 
 install: build # Добавлено 'build' как зависимость, чтобы хелпер точно был скомпилирован перед установкой
-	@echo "Installing $(DISPLAY_NAME) to /Applications/"
-	cp -a $(APP_BUNDLE) $(INSTALL_PATH)
+	@echo "Installing $(DISPLAY_NAME) to $(INSTALL_PATH)/"
+	cp -a $(APP_BUNDLE) $(INSTALL_PATH)/
 	# Копируем скомпилированный хелпер внутрь бандла
 	cp coredisplay_helper $(INSTALL_PATH)/$(APP_NAME).app/Contents/MacOS/
 	codesign --force --deep --sign - $(INSTALL_PATH)/$(APP_NAME).app # Исправлена опечатка tcodesign -> codesign
-	@echo "Installed $(DISPLAY_NAME) to /Applications/"
+	@echo "Installed $(DISPLAY_NAME) to $(INSTALL_PATH)/"
 
 codesign:
 	@echo "Signing $(DISPLAY_NAME) with identity: $(SIGN_IDENTITY)"

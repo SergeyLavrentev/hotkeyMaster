@@ -95,6 +95,7 @@ class TrackpadGestureEngine:
         self._max_move = {}
         self._released_fingers = set()
         self._finger_history = []  # история позиций пальцев для анти-свайп фильтра
+        self._gesture_triggered = False  # Новый флаг для debounce
 
     def start(self):
         dev_array = MT.MTDeviceCreateList()
@@ -123,6 +124,33 @@ class TrackpadGestureEngine:
 
     def stop(self):
         self._running = False
+        try:
+            if hasattr(self, 'DEV') and self.DEV:
+                MT.MTDeviceStop(self.DEV)
+        except Exception as e:
+            import logging
+            logger = logging.getLogger("trackpad")
+            logger.error(f"Ошибка остановки трекпада: {e}")
+
+    def restart(self):
+        """Перезапустить слушатель трекпада"""
+        import logging
+        logger = logging.getLogger("trackpad")
+        logger.info("Перезапуск trackpad engine после пробуждения...")
+        
+        try:
+            # Останавливаем старый слушатель
+            self.stop()
+            time.sleep(0.5)  # Небольшая пауза
+            
+            # Сбрасываем состояние
+            self._reset_gesture_state(reason="restart")
+            
+            # Запускаем заново
+            self.start()
+            logger.info("Trackpad engine перезапущен успешно")
+        except Exception as e:
+            logger.error(f"Ошибка перезапуска trackpad engine: {e}")
 
     def _reset_gesture_state(self, reason=None):
         import logging
@@ -135,6 +163,7 @@ class TrackpadGestureEngine:
         self._gesture_fingers = set()
         self._released_fingers = set()
         self._active = {}
+        self._gesture_triggered = False  # Сброс флага при полном отпускании
 
     def on_frame(self, dev, data, count, ts, frame):
         import logging
@@ -215,8 +244,9 @@ class TrackpadGestureEngine:
                     gesture_name = 'Тап тремя пальцами'
                 elif nfingers == 4:
                     gesture_name = 'Тап четырьмя пальцами'
-            if gesture_name:
+            if gesture_name and not self._gesture_triggered:
                 self.handle_gesture(gesture_name)
+                self._gesture_triggered = True
             self._reset_gesture_state(reason="gesture_complete (all fingers UP)")
 
         # --- PHANTOM TAP: если только UP, но их 3 или 4, и нет активных пальцев/жеста ---
@@ -279,8 +309,9 @@ class TrackpadGestureEngine:
                 gesture_name = 'Тап тремя пальцами'
             elif count == 4:
                 gesture_name = 'Тап четырьмя пальцами'
-            if gesture_name:
+            if gesture_name and not self._gesture_triggered:
                 self.handle_gesture(gesture_name)
+                self._gesture_triggered = True
                 self._reset_gesture_state(reason="phantom_tap (all UP, no DOWN)")
                 self._last_phantom_tap_ts = now
                 self._last_phantom_tap_count = count
