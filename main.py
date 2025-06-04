@@ -180,22 +180,31 @@ def check_accessibility_and_warn():
         return False
 
 def is_another_instance_running():
-    import socket
-    import atexit
+    """Return True if another HotkeyMaster instance is already running."""
+    import fcntl
     LOCK_PATH = '/tmp/hotkeymaster.lock'
-    # Удаляем lock-файл, если он остался (например, после аварийного завершения)
     try:
-        if os.path.exists(LOCK_PATH):
-            os.unlink(LOCK_PATH)
+        lock_fd = open(LOCK_PATH, 'w')
     except Exception:
-        pass
-    sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
-    try:
-        sock.bind(LOCK_PATH)
-        atexit.register(lambda: os.path.exists(LOCK_PATH) and os.unlink(LOCK_PATH))
         return False
-    except OSError:
+
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except IOError:
         return True
+
+    import atexit
+
+    def _release_lock():
+        try:
+            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            lock_fd.close()
+            os.unlink(LOCK_PATH)
+        except Exception:
+            pass
+
+    atexit.register(_release_lock)
+    return False
 
 # Убедимся, что при выходе все слушатели останавливаются
 def cleanup_listeners():
@@ -289,7 +298,13 @@ def main():
     
     # Обработчики событий сна/пробуждения
     def on_system_will_sleep():
-        logger.info("Система засыпает - готовимся к остановке слушателей")
+        logger.info("Система засыпает - останавливаем слушатели")
+        try:
+            stop_quartz_hotkey_listener()
+            if trackpad_engine:
+                trackpad_engine.stop()
+        except Exception as e:
+            logger.error(f"Ошибка остановки слушателей перед сном: {e}")
         
     def on_system_did_wake():
         logger.info("Система проснулась - перезапускаем слушатели")
