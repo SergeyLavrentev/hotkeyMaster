@@ -7,6 +7,7 @@ import subprocess
 import json
 import sip
 import logging
+from hotkey_engine import stop_quartz_hotkey_listener, start_quartz_hotkey_listener
 
 logger = logging.getLogger('hotkeymaster.ui')
 
@@ -135,6 +136,10 @@ class HotkeyInput(QtWidgets.QLineEdit):
         self._prev_mods = set(self._mods)
         self._prev_vk = self._vk
         self._prev_combo_str = self._combo_str
+        try:
+            stop_quartz_hotkey_listener()
+        except Exception:
+            pass
         # Пишем приглашение и запускаем helper для захвата хоткея
         self.setText('Нажмите любую клавишу...')
         self._capture_proc = subprocess.Popen([
@@ -180,6 +185,10 @@ class HotkeyInput(QtWidgets.QLineEdit):
             if hasattr(self, '_capture_proc') and self._capture_proc:
                 self._capture_proc.terminate()
                 self._capture_proc = None
+            try:
+                start_quartz_hotkey_listener()
+            except Exception:
+                pass
             # Вызываем колбэк, чтобы сохранить "отмененное" состояние (старое)
             if self.save_callback:
                 self.save_callback()
@@ -333,6 +342,10 @@ class HotkeyInput(QtWidgets.QLineEdit):
                     self.save_callback()
                 # --- КОНЕЦ ИЗМЕНЕНИЯ ---
             self._capture_proc = None
+            try:
+                start_quartz_hotkey_listener()
+            except Exception:
+                pass
         QtCore.QTimer.singleShot(0, update_ui)
 
 class SettingsWindow(QtWidgets.QDialog):
@@ -644,6 +657,7 @@ class SettingsWindow(QtWidgets.QDialog):
             combo_input.setText(hk.get('combo', {}).get('disp', ''))
             combo_input._mods = set(hk.get('combo', {}).get('mods', []))
             combo_input._vk = hk.get('combo', {}).get('vk')
+            combo_input._combo_str = hk.get('combo', {}).get('disp', '')
             combo_input.setFixedWidth(180)
             grid.addWidget(QtWidgets.QLabel('Комбинация:'), row_idx, 0)
             grid.addWidget(combo_input, row_idx, 1)
@@ -757,6 +771,7 @@ class SettingsWindow(QtWidgets.QDialog):
                 hotkey_input.setText(combo.get('disp', ''))
                 hotkey_input._mods = set(combo.get('mods', []))
                 hotkey_input._vk = combo.get('vk')
+                hotkey_input._combo_str = combo.get('disp', '')
             except Exception:
                 pass
         brightness_input = QtWidgets.QSpinBox(details)
@@ -804,6 +819,7 @@ class SettingsWindow(QtWidgets.QDialog):
                 combo_input.setText(combo.get('disp', ''))
                 combo_input._mods = set(combo.get('mods', []))
                 combo_input._vk = combo.get('vk')
+                combo_input._combo_str = combo.get('disp', '')
             set_action_field(idx)
         # Сначала попытка отключить старую функцию (если она не подключена, игнорируем)
         try:
@@ -1234,6 +1250,7 @@ class SettingsWindow(QtWidgets.QDialog):
                 hotkey_input.setText(combo.get('disp', ''))
                 hotkey_input._mods = set(combo.get('mods', []))
                 hotkey_input._vk = combo.get('vk')
+                hotkey_input._combo_str = combo.get('disp', '')
             except Exception:
                 pass
         vbox.addWidget(QtWidgets.QLabel('Хоткей:'))
@@ -1321,6 +1338,7 @@ class SettingsWindow(QtWidgets.QDialog):
                 hotkey_input.setText(combo.get('disp', ''))
                 hotkey_input._mods = set(combo.get('mods', []))
                 hotkey_input._vk = combo.get('vk')
+                hotkey_input._combo_str = combo.get('disp', '')
             except Exception:
                 pass
         vbox.addWidget(QtWidgets.QLabel('Хоткей:'))
