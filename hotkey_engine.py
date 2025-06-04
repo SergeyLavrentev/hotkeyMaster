@@ -3,6 +3,7 @@ import os # Убедимся, что os импортирован
 import subprocess # Убедимся, что subprocess импортирован
 import logging # Убедимся, что logging импортирован
 import ctypes # Убедимся, что ctypes импортирован
+import ctypes.util
 import threading # Добавляем импорт threading
 import json # Добавляем импорт json
 import time # Добавляем импорт time
