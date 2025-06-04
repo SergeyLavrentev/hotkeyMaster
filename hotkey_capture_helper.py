@@ -42,7 +42,8 @@ def main():
         None
     )
     if not tap:
-        logger.error(json.dumps({'error': 'CGEventTapCreate failed'}))
+        # Print to stdout so the caller can detect the failure
+        print(json.dumps({'error': 'CGEventTapCreate failed'}))
         sys.exit(1)
     run_loop_source = Quartz.CFMachPortCreateRunLoopSource(None, tap, 0)
     loop = Quartz.CFRunLoopGetCurrent()
@@ -51,7 +52,8 @@ def main():
     # Ждём нажатия
     while not captured.is_set():
         Quartz.CFRunLoopRunInMode(Quartz.kCFRunLoopDefaultMode, 0.1, False)
-    logger.info(json.dumps(result))
+    # Output the captured combo to stdout for the parent process
+    print(json.dumps(result))
     sys.exit(0)
 
 if __name__ == '__main__':
