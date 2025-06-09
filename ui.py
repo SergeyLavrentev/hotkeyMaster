@@ -623,8 +623,8 @@ class SettingsWindow(QtWidgets.QDialog):
                     if 0 <= detail_row < len(self._filtered):
                         self._filtered[detail_row] = new_hk_data
                         # Обновляем текст элемента в списке QListWidget
-                        list_item = self.hotkey_list.item(detail_row)
-                        if list_item is not None:
+                        item = self.hotkey_list.item(detail_row)
+                        if item is not None:
                             disp = new_hk_data.get('combo', {}).get('disp') if new_hk_data.get('type') == 'keyboard' else new_hk_data.get('gesture', '')
                             action = new_hk_data.get('action', '')
                             scope = new_hk_data.get('scope', 'global')
@@ -632,11 +632,11 @@ class SettingsWindow(QtWidgets.QDialog):
                             scope_disp = 'Глобальный' if scope == 'global' else f'Только для: {app}'
                             action_disp = self._format_action_display(new_hk_data.get('type', 'keyboard'), action)
                             text = f"{disp}\n{action_disp}\n{scope_disp}"
-                            list_item.setText(text)
+                            item.setText(text)
                             # Обновляем состояние чекбокса и цвет
                             is_enabled = new_hk_data.get('enabled', True)
-                            list_item.setCheckState(QtCore.Qt.Checked if is_enabled else QtCore.Qt.Unchecked)
-                            list_item.setForeground(QtGui.QBrush(QtGui.QColor('black' if is_enabled else 'gray')))
+                            item.setCheckState(QtCore.Qt.Checked if is_enabled else QtCore.Qt.Unchecked)
+                            item.setForeground(QtGui.QBrush(QtGui.QColor('black' if is_enabled else 'gray')))
 
                     logger.info("Хоткей успешно сохранен. Перерегистрация произойдет автоматически.")
                 else:
