@@ -7,7 +7,11 @@ from unittest import mock
 
 
 def worker_is_another_instance(q, home):
-    """Helper process to test single-instance logic."""
+    """Helper process to test single-instance logic.
+
+    This function must be defined at module level so that the multiprocessing
+    "spawn" start method on macOS can pickle it correctly.
+    """
     import importlib
     os.environ['HOME'] = home
     qt_widgets = types.SimpleNamespace(QSystemTrayIcon=object, QMenu=object, QAction=object)
