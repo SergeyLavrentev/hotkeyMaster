@@ -191,8 +191,8 @@ def is_another_instance_running():
     try:
         fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except IOError:
+
         lock_fd.close()
-        return True
 
     import atexit
 

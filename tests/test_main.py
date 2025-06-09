@@ -39,6 +39,7 @@ def worker_is_another_instance(q, home):
     m = importlib.import_module('main')
     q.put(m.is_another_instance_running())
 
+
 class MainHelpersTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -102,9 +103,33 @@ class MainHelpersTest(unittest.TestCase):
         # first call should create lock and return False
         self.assertFalse(self.main.is_another_instance_running())
         # second process should detect lock
-        import multiprocessing
+
+
+        import multiprocessing, types
+        def worker(q, home):
+            import os, sys
+            os.environ['HOME'] = home
+            qt_widgets = types.SimpleNamespace(QSystemTrayIcon=object, QMenu=object, QAction=object)
+            qt_gui = types.SimpleNamespace(QIcon=object)
+            qt_core = types.SimpleNamespace(QObject=object, pyqtSignal=lambda *a, **k: None, Qt=object, QCoreApplication=object)
+            sys.modules.update({
+                'PyQt5': types.SimpleNamespace(QtWidgets=qt_widgets, QtGui=qt_gui, QtCore=qt_core),
+                'PyQt5.QtWidgets': qt_widgets,
+                'PyQt5.QtGui': qt_gui,
+                'PyQt5.QtCore': qt_core,
+                'sip': types.SimpleNamespace(),
+                'ui': types.SimpleNamespace(show_settings_window=lambda *a, **k: None),
+                'trackpad_engine': types.SimpleNamespace(TrackpadGestureEngine=object),
+                'Foundation': types.SimpleNamespace(NSObject=object, NSNotificationCenter=object, NSWorkspace=object),
+                'sleep_wake_monitor': types.SimpleNamespace(get_sleep_wake_monitor=lambda: types.SimpleNamespace(add_sleep_callback=lambda *a, **k: None, add_wake_callback=lambda *a, **k: None, start_monitoring=lambda *a, **k: None, stop_monitoring=lambda *a, **k: None)),
+                'Quartz': types.SimpleNamespace()
+            })
+            import main as m
+            q.put(m.is_another_instance_running())
+
         q = multiprocessing.Queue()
-        p = multiprocessing.Process(target=worker_is_another_instance, args=(q, os.environ['HOME']))
+        p = multiprocessing.Process(target=worker, args=(q, os.environ['HOME']))
+
         p.start(); p.join()
         self.assertTrue(q.get())
 
