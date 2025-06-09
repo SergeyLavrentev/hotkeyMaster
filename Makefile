@@ -1,4 +1,4 @@
-.PHONY: build clean run rebuild install codesign full-install full-rebuild venv312
+.PHONY: build clean run rebuild install codesign full-install full-rebuild venv312 test
 
 APP_NAME=HotkeyMaster
 DISPLAY_NAME="HotkeyMaster"
@@ -11,7 +11,7 @@ PYTHON=python3.12
 
 SIGN_IDENTITY=Developer ID Application: Rocker (TEAMID)
 
-build:
+build: test
 	clang -F /System/Library/PrivateFrameworks \
     -I /System/Library/PrivateFrameworks/CoreDisplay.framework/Headers \
     -framework CoreDisplay -framework CoreGraphics \
@@ -22,6 +22,8 @@ clean:
 	rm -rf $(BUILD_DIR)/
 	rm -rf $(DIST_DIR)/
 	rm -fr __pycache__/
+test:
+	$(PYTHON) -m unittest discover -v tests
 
 run:
 	$(PYTHON) main.py

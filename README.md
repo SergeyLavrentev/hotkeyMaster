@@ -40,11 +40,15 @@ HotkeyMaster is a native macOS application for creating global hotkeys and track
    make venv312
    source venv312/bin/activate
    ```
-2. Build the application:
+2. Run unit tests:
+   ```sh
+   make test
+   ```
+3. Build the application (tests run automatically):
    ```sh
    make build
    ```
-3. Install to /Applications:
+4. Install to /Applications:
    ```sh
    make install
    ```
