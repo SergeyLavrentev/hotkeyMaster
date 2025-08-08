@@ -126,17 +126,62 @@ class SettingsWindow(QtWidgets.QDialog):
         # --- Группы общих настроек ---
         self.grp_general = QtWidgets.QGroupBox('Общие настройки')
         gl = QtWidgets.QVBoxLayout(self.grp_general)
+        # --- Help тексты ---
+        self._help_texts = {
+            'autostart': 'Запускать HotkeyMaster автоматически после входа в систему.\nОтключите, если хотите запускать программу вручную.',
+            'strict': 'Когда включено — хоткей сработает только если НЕТ лишних модификаторов.\nНапример, настроено Cmd+K: при включённой опции Cmd+Alt+K уже НЕ сработает.\nКогда выключено — допускаются дополнительные модификаторы (Cmd+Alt+K тоже сработает).',
+            'debounce': 'Минимальная пауза между двумя одинаковыми жестами, чтобы они засчитались как отдельные срабатывания.',
+            'release_gap': 'Минимальный интервал между последовательными тапами внутри одного жеста.\nУвеличьте, если жесты иногда склеиваются; уменьшите — если жест не распознаётся из-за слишком быстрых тапов.'
+        }
+
+        def _format_tooltip(text: str) -> str:
+            # Превращаем в HTML с сохранением переносов и ограниченной шириной
+            esc = QtCore.Qt.escape if hasattr(QtCore.Qt, 'escape') else lambda s: s.replace('&','&amp;').replace('<','&lt;').replace('>','&gt;')
+            html = esc(text).replace('\n','<br>')
+            return f"<qt><p style='white-space:pre-line; max-width:320px;'>{html}</p></qt>"
+
+        def _make_help_button(key: str):
+            b = QtWidgets.QToolButton()
+            b.setText('?')
+            b.setCursor(QtCore.Qt.PointingHandCursor)
+            b.setAutoRaise(True)
+            b.setFixedSize(20,20)
+            b.setStyleSheet("QToolButton { background:#0A74FF; color:white; border:1px solid #085ecc; border-radius:10px; font-weight:bold; font-size:11px; } QToolButton:hover { background:#2D8CFF; } QToolButton:pressed { background:#0A5FCC; }")
+            txt = self._help_texts.get(key,'Нет описания')
+            b.setToolTip(_format_tooltip(txt))
+            try: b.setToolTipDuration(15000)
+            except Exception: pass
+            return b
+
+        def _wrap_with_help(widget: QtWidgets.QWidget, key: str):
+            cont = QtWidgets.QWidget(); lay = QtWidgets.QHBoxLayout(cont)
+            lay.setContentsMargins(0,0,0,0); lay.setSpacing(8)
+            lay.addWidget(widget)
+            lay.addSpacing(4)
+            lay.addWidget(_make_help_button(key))
+            lay.addStretch(1)
+            return cont
+
         self.cb_autostart = QtWidgets.QCheckBox('Автостарт при входе в macOS')
         self.cb_strict = QtWidgets.QCheckBox('Строгое совпадение модификаторов')
-        gl.addWidget(self.cb_autostart)
-        gl.addWidget(self.cb_strict)
+        gl.addWidget(_wrap_with_help(self.cb_autostart, 'autostart'))
+        gl.addWidget(_wrap_with_help(self.cb_strict, 'strict'))
 
         self.grp_track = QtWidgets.QGroupBox('Трекпад — глобальные параметры')
         fl = QtWidgets.QFormLayout(self.grp_track)
         self.sb_debounce = QtWidgets.QDoubleSpinBox(); self.sb_debounce.setRange(0,3); self.sb_debounce.setDecimals(2); self.sb_debounce.setSingleStep(0.05); self.sb_debounce.setValue(0.60)
         self.sb_release = QtWidgets.QDoubleSpinBox(); self.sb_release.setRange(0,0.5); self.sb_release.setDecimals(3); self.sb_release.setSingleStep(0.01); self.sb_release.setValue(0.02)
-        fl.addRow('Повтор жеста (сек):', self.sb_debounce)
-        fl.addRow('Мин. разрыв тапов (сек):', self.sb_release)
+        # Обёртка для label + help
+        def _label_with_help(text: str, key: str):
+            w = QtWidgets.QWidget(); h = QtWidgets.QHBoxLayout(w)
+            h.setContentsMargins(0,0,0,0); h.setSpacing(8)
+            h.addWidget(QtWidgets.QLabel(text))
+            h.addSpacing(2)
+            h.addWidget(_make_help_button(key))
+            h.addStretch(1)
+            return w
+        fl.addRow(_label_with_help('Повтор жеста (сек):', 'debounce'), self.sb_debounce)
+        fl.addRow(_label_with_help('Мин. разрыв тапов (сек):', 'release_gap'), self.sb_release)
 
         # --- Стек страниц ---
         self._stack_container = QtWidgets.QWidget()
