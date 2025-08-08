@@ -7,7 +7,7 @@ HotkeyMaster is a native macOS application for creating global hotkeys and track
 ## Features
 - Global hotkeys for any application
 - Trackpad gesture support (1–4 fingers, tap and swipe)
-- Actions: launch apps, open URLs, emulate keypresses, run scripts
+- Actions: launch apps, open URLs, open a selected installed application (new `open_app`), emulate keypresses, run scripts, control brightness
 - Flexible configuration via graphical interface (PyQt5)
 - Tray icon in the system menu bar (no Dock or Cmd+Tab presence)
 - Automatic hotkey re-registration on settings change
@@ -15,6 +15,10 @@ HotkeyMaster is a native macOS application for creating global hotkeys and track
 - Phantom tap filtering for reliable gesture detection
 - Settings stored in `hotkeys.json`
 - Native support for both Intel and Apple Silicon (macOS 12+)
+- Persistent settings window (no widget recreation crashes) and window size memory
+- Single-instance settings dialog (focuses existing window instead of opening duplicates)
+- Robust modifier matching (case-insensitive; corrected Cmd/Ctrl inversion on some macOS configs)
+- Structured debug logging (verbose in dev via `HOTKEYMASTER_DEV=1`, errors-only in production)
 
 <img width="891" alt="image" src="https://github.com/user-attachments/assets/c6ecbec3-0f54-42c7-8e70-a78ef9acebf7" />
 
@@ -68,7 +72,7 @@ Global hotkeys require "Accessibility" permissions:
 
 ## Extending & Customization
 - Add new gestures (e.g., 5-finger tap) by editing `trackpad_engine.py`
-- Actions can be customized: app launch, URL open, key emulation, scripts
+- Actions can be customized: app launch, URL open, open installed application (`open_app <Name>`), key emulation, brightness control, scripts
 - Tray menu and UI can be extended via `ui.py`
 
 ## Troubleshooting & Limitations
@@ -77,6 +81,7 @@ Global hotkeys require "Accessibility" permissions:
 - App is hidden from Dock and Cmd+Tab by default
 - For autostart, LaunchAgents plist is used (see `autolaunch.py`)
 - Known issue: Some system gestures may interfere with custom gestures (phantom tap filter reduces false positives)
+- If a previously saved `open_app` action showed a missing first letter, update to latest version (off‑by‑one slice fixed) and re-save the action.
 
 ## Dependencies
 - PyQt5, pyobjc, pynput, pystray, pillow
