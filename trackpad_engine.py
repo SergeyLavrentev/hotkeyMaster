@@ -78,34 +78,97 @@ MAX_DPOS_SWIPE = 0.07  # Новый, более строгий порог для
 SWIPE_TRAJ_WINDOW = 7  # Окно анализа траектории (кадров)
 MAX_SWIPE_SPEED = 1.2  # Максимальная скорость (норм.ед./сек) для тапа
 SYNC_ANGLE_THRESHOLD = 20  # градусы, допустимое расхождение направлений
+GESTURE_RELEASE_GAP = 0.02  # минимальная пауза (сек) пустого трекпада (ускорено для быстрого повторного тапа)
 
 class TrackpadGestureEngine:
     def __init__(self, get_gesture_actions, run_action_func, get_active_app_name_func=None):
-        self._active = {}
-        self.start_ts = None
-        self.get_gesture_actions = get_gesture_actions
-        self.run_action = run_action_func
-        self.get_active_app_name = get_active_app_name_func
-        self._cb = CB_TYPE(self.on_frame)
-        self._running = False
-        self._gesture_timeout = 1.0  # Таймаут для принудительного сброса жеста (сек)
-        self._last_activity_ts = None  # Последняя активность для отслеживания таймаута
-        self._gesture_fingers = set()
-        self._last_down = {}
-        self._max_move = {}
-        self._released_fingers = set()
-        self._finger_history = []  # история позиций пальцев для анти-свайп фильтра
-        self._gesture_triggered = False  # Новый флаг для debounce
+            # Основные колбэки и зависимости
+            self.get_gesture_actions = get_gesture_actions
+            self.run_action = run_action_func
+            self.get_active_app_name = get_active_app_name_func
+
+            # Служебные структуры состояния жеста
+            self._active = {}               # active fingers: fid -> (x,y,ts_down)
+            self._gesture_fingers = set()   # все пальцы, участвующие в текущем жесте
+            self._released_fingers = set()  # уже отпущенные пальцы
+            self._last_down = {}            # fid -> (x0,y0) для расчёта смещения
+            self._max_move = {}             # fid -> max distance
+            self._finger_history = []       # [(ts, {fid:(x,y)})] для анти-свайп анализа
+
+            # Тайминги
+            self.start_ts = None
+            self._last_activity_ts = None
+            self._gesture_timeout = 1.0     # таймаут форс-сброса
+
+            # Флаги / debounce
+            self._gesture_triggered = False
+            self._gesture_last_fire = {}    # gesture_name -> ts
+            self._gesture_debounce = 0.6    # сек. подавления повторного жеста (может быть переопределено настройкой)
+            # Дополнительный контроль: время, когда трекпад стал полностью пустым после жеста
+            self._empty_since = None
+            self._last_frame_ids = set()
+            # Возможная переопределяемая пауза освобождения
+            self._release_gap = GESTURE_RELEASE_GAP
+            self._load_gesture_settings()
+
+            # Общие служебные поля
+            self._cb = CB_TYPE(self.on_frame)
+            self._running = False
 
     def start(self):
-        dev_array = MT.MTDeviceCreateList()
-        if CF.CFArrayGetCount(dev_array) == 0:
-            raise RuntimeError("Trackpad not found")
-        self.DEV = CF.CFArrayGetValueAtIndex(dev_array, 0)
-        MT.MTRegisterContactFrameCallback(self.DEV, self._cb)
-        MT.MTDeviceStart(self.DEV, 0)
-        self._running = True
-        threading.Thread(target=self._run, daemon=True).start()
+        """Запустить слушатель трекпада"""
+        import logging
+        logger = logging.getLogger("trackpad")
+        
+        try:
+            # Проверяем, что мы не запущены уже
+            if self._running:
+                logger.warning("Trackpad engine уже запущен")
+                return
+            
+            logger.info("Запуск trackpad engine...")
+            
+            # Получаем список устройств
+            dev_array = MT.MTDeviceCreateList()
+            if not dev_array:
+                raise RuntimeError("Не удалось получить список multitouch устройств")
+                
+            device_count = CF.CFArrayGetCount(dev_array)
+            if device_count == 0:
+                raise RuntimeError("Trackpad не найден - список устройств пуст")
+            
+            logger.info(f"Найдено {device_count} multitouch устройств")
+            
+            # Берём первое устройство (обычно это основной trackpad)
+            self.DEV = CF.CFArrayGetValueAtIndex(dev_array, 0)
+            if not self.DEV:
+                raise RuntimeError("Не удалось получить указатель на trackpad устройство")
+            
+            logger.info(f"Использую устройство с указателем: 0x{self.DEV:x}")
+            
+            # Регистрируем callback
+            result = MT.MTRegisterContactFrameCallback(self.DEV, self._cb)
+            if result != 0:
+                logger.warning(f"MTRegisterContactFrameCallback вернул код: {result}")
+            
+            # Запускаем устройство
+            result = MT.MTDeviceStart(self.DEV, 0)
+            if result != 0:
+                logger.warning(f"MTDeviceStart вернул код: {result}")
+            
+            # Помечаем как запущенный и стартуем поток мониторинга
+            self._running = True
+            threading.Thread(target=self._run, daemon=True).start()
+            
+            logger.info("Trackpad engine успешно запущен")
+            
+        except Exception as e:
+            logger.error(f"Критическая ошибка запуска trackpad engine: {e}")
+            # Очищаем состояние при ошибке
+            self._running = False
+            if hasattr(self, 'DEV'):
+                self.DEV = None
+            raise
 
     def _run(self):
         import logging
@@ -123,14 +186,42 @@ class TrackpadGestureEngine:
                 logger.debug(f"[TIMEOUT] Gesture state reset complete")
 
     def stop(self):
+        """Остановить слушатель трекпада"""
+        import logging
+        logger = logging.getLogger("trackpad")
+        logger.info("Остановка trackpad engine...")
+        
         self._running = False
+        
         try:
             if hasattr(self, 'DEV') and self.DEV:
-                MT.MTDeviceStop(self.DEV)
+                try:
+                    # Сначала пытаемся отписаться от callback
+                    try:
+                        # Устанавливаем пустой callback
+                        empty_cb = CB_TYPE(lambda *args: None)
+                        MT.MTRegisterContactFrameCallback(self.DEV, empty_cb)
+                    except Exception as e:
+                        logger.warning(f"Ошибка отписки от callback: {e}")
+                    
+                    # Останавливаем устройство
+                    MT.MTDeviceStop(self.DEV)
+                    logger.info("Trackpad device остановлен")
+                except Exception as e:
+                    logger.error(f"Ошибка остановки трекпада: {e}")
+                finally:
+                    # Обнуляем ссылку на устройство
+                    self.DEV = None
         except Exception as e:
-            import logging
-            logger = logging.getLogger("trackpad")
-            logger.error(f"Ошибка остановки трекпада: {e}")
+            logger.error(f"Критическая ошибка при остановке trackpad engine: {e}")
+        
+        # Сбрасываем состояние независимо от ошибок
+        try:
+            self._reset_gesture_state(reason="stop")
+        except Exception as e:
+            logger.error(f"Ошибка сброса состояния: {e}")
+        
+        logger.info("Trackpad engine остановлен")
 
     def restart(self):
         """Перезапустить слушатель трекпада"""
@@ -139,38 +230,89 @@ class TrackpadGestureEngine:
         logger.info("Перезапуск trackpad engine после пробуждения...")
         
         try:
-            # Останавливаем старый слушатель
+            # Останавливаем старый слушатель с защитой от ошибок
+            old_dev = getattr(self, 'DEV', None)
             self.stop()
-            time.sleep(0.5)  # Небольшая пауза
             
-            # Сбрасываем состояние
+            # Даем время для полной остановки
+            time.sleep(1.0)
+            
+            # Полностью сбрасываем состояние
             self._reset_gesture_state(reason="restart")
             
-            # Запускаем заново
-            self.start()
-            logger.info("Trackpad engine перезапущен успешно")
+            # Очищаем старые ссылки на устройство
+            if hasattr(self, 'DEV'):
+                delattr(self, 'DEV')
+            
+            # Пытаемся запустить заново несколько раз
+            max_attempts = 3
+            for attempt in range(max_attempts):
+                try:
+                    self.start()
+                    logger.info(f"Trackpad engine перезапущен успешно с попытки {attempt + 1}")
+                    return
+                except Exception as e:
+                    logger.warning(f"Попытка {attempt + 1} перезапуска trackpad engine неудачна: {e}")
+                    if attempt < max_attempts - 1:
+                        time.sleep(0.5)
+                    else:
+                        raise
+            
         except Exception as e:
-            logger.error(f"Ошибка перезапуска trackpad engine: {e}")
+            logger.error(f"Критическая ошибка перезапуска trackpad engine: {e}")
+            # Попытаемся хотя бы сбросить состояние
+            try:
+                self._reset_gesture_state(reason="restart_error")
+            except:
+                pass
 
     def _reset_gesture_state(self, reason=None):
-        import logging
-        logger = logging.getLogger("trackpad")
-        logger.debug(f"[RESET_GESTURE_STATE] called. Reason: {reason if reason else 'unspecified'}")
-        self.start_ts = None
-        self._last_activity_ts = None
-        self._last_down = {}
-        self._max_move = {}
-        self._gesture_fingers = set()
-        self._released_fingers = set()
-        self._active = {}
-        self._gesture_triggered = False  # Сброс флага при полном отпускании
+            import logging
+            logger = logging.getLogger("trackpad")
+            logger.debug(f"[RESET_GESTURE_STATE] called. Reason: {reason if reason else 'unspecified'}")
+            self.start_ts = None
+            self._last_activity_ts = None
+            self._last_down = {}
+            self._max_move = {}
+            self._gesture_fingers = set()
+            self._released_fingers = set()
+            self._active = {}
+            # Не сбрасываем _gesture_triggered здесь: он освободится только после реального “пустого окна”
+            # Это предотвращает бесконечные повторные срабатывания при удержании пальцев.
 
     def on_frame(self, dev, data, count, ts, frame):
+        """Обработчик событий трекпада"""
+        try:
+            self._on_frame_impl(dev, data, count, ts, frame)
+        except Exception as e:
+            import logging
+            logger = logging.getLogger("trackpad")
+            logger.error(f"Критическая ошибка в on_frame: {e}", exc_info=True)
+            # Сбрасываем состояние при ошибке
+            try:
+                self._reset_gesture_state(reason="error_recovery")
+            except:
+                pass
+    
+    def _on_frame_impl(self, dev, data, count, ts, frame):
         import logging
         logger = logging.getLogger("trackpad")
         fingers = ctypes.cast(data, ctypes.POINTER(Finger))
         # Логируем все состояния пальцев в кадре и собираем уникальные state
         fingers = ctypes.cast(data, ctypes.POINTER(Finger))
+        # --- История пальцев для анти-свайп фильтра ---
+        try:
+            snapshot = {}
+            for i in range(count):
+                f = fingers[i]
+                snapshot[f.identifier] = (f.norm.pos.x, f.norm.pos.y)
+            # Добавляем (timestamp, snapshot)
+            self._finger_history.append((ts, snapshot))
+            # Обрезаем окно по длине и времени
+            if len(self._finger_history) > SWIPE_TRAJ_WINDOW * 3:
+                self._finger_history = self._finger_history[-SWIPE_TRAJ_WINDOW:]
+        except Exception:
+            pass
         # 1. Обновляем карту активных пальцев и сохраняем DOWN-координаты и максимальное смещение
         for i in range(count):
             f = fingers[i]
@@ -246,7 +388,8 @@ class TrackpadGestureEngine:
                     gesture_name = 'Тап четырьмя пальцами'
             if gesture_name and not self._gesture_triggered:
                 self.handle_gesture(gesture_name)
-                self._gesture_triggered = True
+                self._gesture_triggered = True  # блокируем до полной “тишины”
+            # Сбрасываем периферийные структуры, но не снимаем флаг
             self._reset_gesture_state(reason="gesture_complete (all fingers UP)")
 
         # --- PHANTOM TAP: если только UP, но их 3 или 4, и нет активных пальцев/жеста ---
@@ -317,10 +460,42 @@ class TrackpadGestureEngine:
                 self._last_phantom_tap_count = count
             return
 
+        # --- Разблокировка жестового cooldown после реального освобождения поверхности ---
+        # Условия “пусто”: нет активных пальцев, нет новых DOWN/MOVE в кадре
+        # Текущие идентификаторы пальцев в кадре
+        current_ids_frame = set(fingers[i].identifier for i in range(count))
+        any_down_or_move_frame = any(f.state in (1,2) for f in fingers[:count])
+        # Условие “пусто” теперь расширено: либо совсем нет пальцев, либо нет активных DOWN/MOVE и наши структуры пусты
+        release_condition = (not current_ids_frame) or (not any_down_or_move_frame and not self._active)
+        if release_condition:
+            if self._gesture_triggered:
+                # Засекаем момент, когда стало пусто
+                if self._empty_since is None:
+                    self._empty_since = time.time()
+                elif time.time() - self._empty_since >= self._release_gap:
+                    # Достаточная пауза — разрешаем следующий жест
+                    self._gesture_triggered = False
+                    self._empty_since = None
+            else:
+                # Пусто и не заблокировано — сбрасываем таймер
+                self._empty_since = None
+        else:
+            # Есть активность — сбрасываем маркер пустоты
+            self._empty_since = None
+        self._last_frame_ids = current_ids_frame
+
     def handle_gesture(self, gesture_name):
         import logging
         logger = logging.getLogger("trackpad")
         logger.debug(f"[GESTURE] handle_gesture called with: {gesture_name}")
+
+        # Подавление повтора одинакового жеста (быстрое многократное определение)
+        now = time.time()
+        last = self._gesture_last_fire.get(gesture_name)
+        if last is not None and (now - last) < self._gesture_debounce:
+            logger.debug(f"[GESTURE][DEBOUNCE] suppressed repeat of {gesture_name} ({now - last:.3f}s < {self._gesture_debounce}s)")
+            return
+        self._gesture_last_fire[gesture_name] = now
         
         actions = self.get_gesture_actions()
         logger.debug(f"[GESTURE] Found {len(actions)} total actions")
@@ -341,3 +516,31 @@ class TrackpadGestureEngine:
                         continue
                 logger.debug(f"[GESTURE] Executing action: {hk.get('action')}")
                 self.run_action(hk.get('action'))
+
+    # --- Settings integration ---
+    def _load_gesture_settings(self):
+        """Пытаемся загрузить gesture настройки из settings.json (не критично). Формат:
+        {
+          "gesture_debounce": 0.5,
+          "gesture_release_gap": 0.03
+        }
+        """
+        try:
+            import json, os
+            # Используем единый путь с hotkey_engine/ui (Application Support)
+            settings_path = os.path.join(os.path.expanduser('~'), 'Library', 'Application Support', 'HotkeyMaster', 'settings.json')
+            if not os.path.exists(settings_path):
+                return
+            st = os.stat(settings_path)
+            if not hasattr(self, '_settings_mtime') or self._settings_mtime != st.st_mtime:
+                with open(settings_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                gd = data.get('gesture_debounce')
+                if isinstance(gd, (int, float)) and gd >= 0:
+                    self._gesture_debounce = float(gd)
+                rg = data.get('gesture_release_gap')
+                if isinstance(rg, (int, float)) and 0 <= rg <= 0.5:
+                    self._release_gap = float(rg)
+                self._settings_mtime = st.st_mtime
+        except Exception:
+            pass

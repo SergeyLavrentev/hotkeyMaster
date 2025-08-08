@@ -20,9 +20,10 @@ from Foundation import NSObject
 from objc import selector
 
 from hotkey_engine import (
-    load_hotkeys, save_hotkeys, run_action, get_active_app_name, start_quartz_hotkey_listener,
+    load_hotkeys, save_hotkeys, start_quartz_hotkey_listener,
     stop_quartz_hotkey_listener, restart_quartz_hotkey_listener
 )
+from actions import run_action, get_active_app_name
 from sleep_wake_monitor import get_sleep_wake_monitor
 
 HOTKEYS_FILE = 'hotkeys.json'
@@ -31,79 +32,87 @@ LOG_DIR = os.path.join(os.path.expanduser('~'), 'Library', 'Logs')
 LOG_FILE = os.path.join(LOG_DIR, 'HotkeyMaster.log')
 os.makedirs(LOG_DIR, exist_ok=True)
 
-# Определяем уровень логирования: DEBUG для разработки, INFO для production
-if getattr(sys, 'frozen', False):
-    log_level = logging.INFO
-else:
+DEV_MODE = bool(os.environ.get('HOTKEYMASTER_DEV')) and not getattr(sys, 'frozen', False)
+if DEV_MODE:
     log_level = logging.DEBUG
+else:
+    log_level = logging.ERROR  # в проде пишем минимально
 
-logging.basicConfig(
-    level=log_level,
-    format='[%(asctime)s] %(levelname)s: %(message)s',
-    handlers=[
-        logging.FileHandler(LOG_FILE, encoding='utf-8')
-    ]
+# Настраиваем ротацию логов для предотвращения переполнения
+from logging.handlers import RotatingFileHandler
+
+handlers = []
+fmt = '[%(asctime)s] %(levelname)s [%(name)s]: %(message)s'
+if DEV_MODE:
+    # Все в stdout
+    stream_h = logging.StreamHandler(sys.stdout)
+    stream_h.setLevel(log_level)
+    stream_h.setFormatter(logging.Formatter(fmt))
+    handlers.append(stream_h)
+else:
+    # Только файл, уровень ERROR
+    file_handler = RotatingFileHandler(
+        LOG_FILE,
+        maxBytes=10*1024*1024,
+        backupCount=5,
+        encoding='utf-8'
+    )
+    file_handler.setLevel(log_level)
+    file_handler.setFormatter(logging.Formatter(fmt))
+    handlers.append(file_handler)
+
+logging.basicConfig(level=log_level, handlers=handlers, format=fmt)
+
+# Добавляем дополнительный обработчик для критических ошибок
+critical_handler = RotatingFileHandler(
+    os.path.join(LOG_DIR, 'HotkeyMaster_errors.log'),
+    maxBytes=5*1024*1024,  # 5MB
+    backupCount=3,
+    encoding='utf-8'
 )
+critical_handler.setLevel(logging.ERROR)
+critical_handler.setFormatter(logging.Formatter(
+    '[%(asctime)s] CRITICAL [%(name)s]: %(message)s\nTraceback: %(exc_info)s\n---'
+))
+
 logger = logging.getLogger('hotkeymaster')
+logger.addHandler(critical_handler)
 
-def get_active_app_name():
-    # Получить имя активного приложения через Quartz
-    ws = Quartz.CGWindowListCopyWindowInfo(Quartz.kCGWindowListOptionOnScreenOnly, Quartz.kCGNullWindowID)
-    for w in ws:
-        if w.get('kCGWindowLayer') == 0 and w.get('kCGWindowOwnerName'):
-            return w['kCGWindowOwnerName']
-    return None
+# Логируем старт приложения
+logger.info("=" * 60)
+logger.log(logging.DEBUG if DEV_MODE else logging.ERROR, "HotkeyMaster запускается (dev=%s, level=%s)", DEV_MODE, logging.getLevelName(log_level))
+logger.info("=" * 60)
 
-def run_action(action):
-    logger.debug(f'Выполнение действия: {action}')
-    if action.startswith('message:'):
-        msg = action[len('message:'):]
-        app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
-        QtWidgets.QMessageBox.information(None, 'Hotkey', msg)
-    elif action.startswith('open '):
-        url = action[len('open '):].strip()
-        if not url.startswith('http://') and not url.startswith('https://'):
-            url = 'https://' + url
-        logger.debug(f'Открываю URL: {url}')
-        import webbrowser
-        webbrowser.open(url)
-    elif action.startswith('run '):
-        cmd = action[len('run '):].strip()
-        logger.debug(f'Запускаю команду: {cmd}')
-        import subprocess
-        try:
-            subprocess.Popen(cmd, shell=True)
-        except Exception as e:
-            logger.error(f'Ошибка запуска команды: {e}')
-    elif action.startswith('hotkey:'):
-        import json
-        try:
-            combo = json.loads(action[7:])
-            mods = set(combo.get('mods', []))
-            vk = combo.get('vk')
-            # Эмуляция нажатия хоткея через Quartz
-            from Quartz import (
-                CGEventCreateKeyboardEvent, CGEventSetFlags,
-                CGEventPost, kCGHIDEventTap, kCGEventFlagMaskCommand,
-                kCGEventFlagMaskShift, kCGEventFlagMaskAlternate, kCGEventFlagMaskControl
-            )
-            flags = 0
-            if 'Cmd' in mods:
-                flags |= kCGEventFlagMaskCommand
-            if 'Shift' in mods:
-                flags |= kCGEventFlagMaskShift
-            if 'Alt' in mods:
-                flags |= kCGEventFlagMaskAlternate
-            if 'Ctrl' in mods:
-                flags |= kCGEventFlagMaskControl
-            for down in (True, False):
-                ev = CGEventCreateKeyboardEvent(None, vk, down)
-                CGEventSetFlags(ev, flags)
-                CGEventPost(kCGHIDEventTap, ev)
-        except Exception as e:
-            logger.error(f'Ошибка эмуляции хоткея: {e}')
-    else:
-        logger.debug(f'Неизвестное действие: {action}')
+def handle_exception(exc_type, exc_value, exc_traceback):
+    """Обработчик неперехваченных исключений"""
+    if issubclass(exc_type, KeyboardInterrupt):
+        # Разрешаем KeyboardInterrupt работать как обычно
+        sys.__excepthook__(exc_type, exc_value, exc_traceback)
+        return
+    
+    logger.critical("Неперехваченное исключение:", 
+                   exc_info=(exc_type, exc_value, exc_traceback))
+    
+    # Пытаемся корректно завершить работу
+    try:
+        logger.info("Попытка корректного завершения после критической ошибки...")
+        cleanup_listeners()
+        
+        # Останавливаем мониторинг сна
+        from sleep_wake_monitor import get_sleep_wake_monitor
+        sleep_monitor = get_sleep_wake_monitor()
+        sleep_monitor.stop_monitoring()
+        
+    except Exception as cleanup_error:
+        logger.critical(f"Ошибка при cleanup после критической ошибки: {cleanup_error}")
+    
+    # Завершаем с кодом ошибки
+    sys.exit(1)
+
+# Устанавливаем обработчик неперехваченных исключений
+sys.excepthook = handle_exception
+
+## run_action и get_active_app_name теперь импортируются из actions
 
 def open_settings_window():
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
@@ -308,17 +317,39 @@ def main():
         
     def on_system_did_wake():
         logger.info("Система проснулась - перезапускаем слушатели")
-        try:
-            # Перезапускаем hotkey listener
-            restart_quartz_hotkey_listener()
-            
-            # Перезапускаем trackpad engine
-            if trackpad_engine:
-                trackpad_engine.restart()
+        
+        # Используем QtTimer для отложенного перезапуска в главном потоке
+        from PyQt5.QtCore import QTimer
+        
+        def delayed_restart():
+            try:
+                logger.info("Начинаем отложенный перезапуск слушателей...")
                 
-            logger.info("Все слушатели успешно перезапущены после пробуждения")
-        except Exception as e:
-            logger.error(f"Ошибка перезапуска слушателей после пробуждения: {e}")
+                # Перезапускаем hotkey listener
+                try:
+                    restart_quartz_hotkey_listener()
+                    logger.info("Hotkey listener перезапущен")
+                except Exception as e:
+                    logger.error(f"Ошибка перезапуска hotkey listener: {e}")
+                
+                # Небольшая пауза между перезапусками
+                import time
+                time.sleep(0.2)
+                
+                # Перезапускаем trackpad engine
+                if trackpad_engine:
+                    try:
+                        trackpad_engine.restart()
+                        logger.info("Trackpad engine перезапущен")
+                    except Exception as e:
+                        logger.error(f"Ошибка перезапуска trackpad engine: {e}")
+                        
+                logger.info("Все слушатели успешно перезапущены после пробуждения")
+            except Exception as e:
+                logger.error(f"Критическая ошибка перезапуска слушателей: {e}")
+        
+        # Задержка 2 секунды для стабилизации системы после пробуждения
+        QTimer.singleShot(2000, delayed_restart)
     
     # Подключаем обработчики
     sleep_monitor.add_sleep_callback(on_system_will_sleep)

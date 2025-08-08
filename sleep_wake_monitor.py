@@ -83,24 +83,45 @@ class SleepWakeMonitor(QObject):
             return
             
         try:
-            if self._notification_center:
-                self._notification_center.removeObserver_(self)
             self._check_timer.stop()
+            if self._notification_center:
+                try:
+                    self._notification_center.removeObserver_(self)
+                except Exception as e:
+                    logger.error(f"Ошибка при удалении observer: {e}")
+            self._notification_center = None
             self._is_monitoring = False
             logger.info("Мониторинг сна/пробуждения остановлен")
         except Exception as e:
             logger.error(f"Ошибка остановки мониторинга: {e}")
+            # Принудительно сбрасываем состояние даже при ошибке
+            self._is_monitoring = False
+            self._notification_center = None
             
     def systemWillSleep_(self, notification):
         """Обработчик уведомления о засыпании (Objective-C selector)"""
-        logger.info("Система засыпает...")
-        self.system_will_sleep.emit()
+        try:
+            logger.info("Система засыпает...")
+            self.system_will_sleep.emit()
+        except Exception as e:
+            logger.error(f"Ошибка в systemWillSleep_: {e}")
         
     def systemDidWake_(self, notification):
         """Обработчик уведомления о пробуждении (Objective-C selector)"""
-        logger.info("Система проснулась!")
-        self._last_wake_time = time.time()
-        self.system_did_wake.emit()
+        try:
+            logger.info("Система проснулась!")
+            self._last_wake_time = time.time()
+            self.system_did_wake.emit()
+        except Exception as e:
+            logger.error(f"Ошибка в systemDidWake_: {e}")
+            # Перезапускаем мониторинг при ошибке
+            try:
+                self.stop_monitoring()
+                time.sleep(1.0)
+                self.start_monitoring()
+                logger.info("Мониторинг сна/пробуждения перезапущен после ошибки")
+            except Exception as restart_error:
+                logger.error(f"Не удалось перезапустить мониторинг: {restart_error}")
         
     def _handle_will_sleep(self):
         """Обработка события засыпания"""
@@ -119,6 +140,24 @@ class SleepWakeMonitor(QObject):
                 callback()
             except Exception as e:
                 logger.error(f"Ошибка в callback пробуждения: {e}")
+        
+        # Проверяем, что мониторинг все еще работает после пробуждения
+        self._schedule_monitoring_check()
+    
+    def _schedule_monitoring_check(self):
+        """Планируем проверку работоспособности мониторинга"""
+        from PyQt5.QtCore import QTimer
+        
+        def check_monitoring():
+            if not self._is_monitoring:
+                logger.warning("Мониторинг отключен после пробуждения, пытаемся восстановить...")
+                try:
+                    self.start_monitoring()
+                except Exception as e:
+                    logger.error(f"Не удалось восстановить мониторинг: {e}")
+        
+        # Проверяем через 5 секунд после пробуждения
+        QTimer.singleShot(5000, check_monitoring)
                 
     def _periodic_check(self):
         """Периодическая проверка состояния (fallback)"""

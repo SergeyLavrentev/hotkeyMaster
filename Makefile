@@ -1,4 +1,4 @@
-.PHONY: build clean run rebuild install codesign full-install full-rebuild venv312
+.PHONY: build clean run rebuild install codesign full-install full-rebuild venv312 test
 
 APP_NAME=HotkeyMaster
 DISPLAY_NAME="HotkeyMaster"
@@ -24,7 +24,7 @@ clean:
 	rm -fr __pycache__/
 
 run:
-	$(PYTHON) main.py
+	HOTKEYMASTER_DEV=1 $(PYTHON) main.py
 
 rebuild: clean build
 
@@ -50,3 +50,12 @@ full-rebuild: clean build install codesign
 venv312:
 	python3.12 -m venv venv312
 	. venv312/bin/activate && pip install -r requirements.txt && pip install pyinstaller
+
+test:
+	@echo "Running tests..."
+	@if [ -d venv312 ]; then \
+		. venv312/bin/activate && python -m pytest -q ; \
+	else \
+		($(PYTHON) -c "import pytest" 2>/dev/null || echo 'Pytest не найден. Создайте venv: make venv312') && $(PYTHON) -m pytest -q ; \
+	fi
+	@echo "Tests completed"
