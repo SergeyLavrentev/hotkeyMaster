@@ -47,19 +47,28 @@ class SleepWakeMonitor(QObject):
             return
             
         try:
-            # Подписываемся на уведомления NSWorkspace
+            # Используем notificationCenter рабочего пространства (важно — defaultCenter не доставляет workspace нотификации стабильно)
             workspace = NSWorkspace.sharedWorkspace()
-            self._notification_center = NSNotificationCenter.defaultCenter()
-            
-            # Уведомление о засыпании
-            self._notification_center.addObserver_selector_name_object_(
-                self, 'systemWillSleep:', 'NSWorkspaceWillSleepNotification', None
-            )
-            
-            # Уведомление о пробуждении
-            self._notification_center.addObserver_selector_name_object_(
-                self, 'systemDidWake:', 'NSWorkspaceDidWakeNotification', None
-            )
+            try:
+                # В новых версиях PyObjC notificationCenter — метод workspace
+                self._notification_center = workspace.notificationCenter()
+            except Exception:
+                # Fallback на defaultCenter (хуже, но лучше чем ничего)
+                self._notification_center = NSNotificationCenter.defaultCenter()
+
+            # Подписки. PyObjC автоматически сопоставляет selector с методом Python ( systemWillSleep_ ).
+            if self._notification_center is not None:
+                try:
+                    self._notification_center.addObserver_selector_name_object_(
+                        self, 'systemWillSleep:', 'NSWorkspaceWillSleepNotification', None
+                    )
+                    self._notification_center.addObserver_selector_name_object_(
+                        self, 'systemDidWake:', 'NSWorkspaceDidWakeNotification', None
+                    )
+                except Exception as e:
+                    logger.error(f"Не удалось подписаться на workspace notifications: {e}")
+            else:
+                logger.warning("notificationCenter недоступен; остаёмся только на fallback таймере")
             
             # Соединяем сигналы
             self.system_will_sleep.connect(self._handle_will_sleep)

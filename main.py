@@ -350,6 +350,19 @@ def main():
         
         # Задержка 2 секунды для стабилизации системы после пробуждения
         QTimer.singleShot(2000, delayed_restart)
+        # Watchdog: если спустя 6с после пробуждения слушатели не генерируют событий (tap disabled) — форс рестарт
+        from PyQt5.QtCore import QTimer as _QTimer
+        def watchdog():
+            try:
+                # Простая эвристика: проверим поток hotkey listener жив ли
+                from hotkey_engine import _hotkey_listener_thread
+                alive = bool(_hotkey_listener_thread and _hotkey_listener_thread.is_alive())
+                if not alive:
+                    logger.warning("Watchdog: hotkey listener не жив после пробуждения — форс рестарт")
+                    restart_quartz_hotkey_listener()
+            except Exception as e:
+                logger.error(f"Watchdog ошибка: {e}")
+        _QTimer.singleShot(6000, watchdog)
     
     # Подключаем обработчики
     sleep_monitor.add_sleep_callback(on_system_will_sleep)

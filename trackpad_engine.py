@@ -59,6 +59,10 @@ CB_TYPE = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p
 MT.MTDeviceCreateList.restype = CFArrayRef
 MT.MTRegisterContactFrameCallback.argtypes = [ctypes.c_void_p, CB_TYPE]
 MT.MTDeviceStart.argtypes = [ctypes.c_void_p, ctypes.c_int]
+try:
+    MT.MTDeviceStop.argtypes = [ctypes.c_void_p]
+except Exception:
+    pass
 
 class MTPoint(ctypes.Structure):
     _fields_ = [("x", ctypes.c_float), ("y", ctypes.c_float)]
