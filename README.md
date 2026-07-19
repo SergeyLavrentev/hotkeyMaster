@@ -1,90 +1,80 @@
-# HotkeyMaster
+# HotkeyMaster 2
 
-> **Note:** HotkeyMaster is an open source, free, and simpler alternative to BetterTouchTool for macOS. It provides essential hotkey and gesture automation features without the complexity or cost.
-
-HotkeyMaster is a native macOS application for creating global hotkeys and trackpad gestures to control apps and automate actions. It features a modern tray UI, flexible configuration, and deep system integration.
+HotkeyMaster is a native macOS menu-bar application for global keyboard
+shortcuts and three-/four-finger trackpad taps. Version 2 is a greenfield Swift
+rewrite; the Python/PyQt implementation in the repository is legacy code and is
+not used by the native application.
 
 ## Features
-- Global hotkeys for any application
-- Trackpad gesture support (1–4 fingers, tap and swipe)
-- Actions: launch apps, open URLs, open a selected installed application (new `open_app`), emulate keypresses, run scripts, control brightness
-- Flexible configuration via graphical interface (PyQt5)
-- Tray icon in the system menu bar (no Dock or Cmd+Tab presence)
-- Automatic hotkey re-registration on settings change
-- Autostart on login (via LaunchAgents)
-- Phantom tap filtering for reliable gesture detection
-- Settings stored in `hotkeys.json`
-- Native support for both Intel and Apple Silicon (macOS 12+)
-- Persistent settings window (no widget recreation crashes) and window size memory
-- Single-instance settings dialog (focuses existing window instead of opening duplicates)
-- Robust modifier matching (case-insensitive; corrected Cmd/Ctrl inversion on some macOS configs)
-- Structured debug logging (verbose in dev via `HOTKEYMASTER_DEV=1`, errors-only in production)
 
-<img width="891" alt="image" src="https://github.com/user-attachments/assets/c6ecbec3-0f54-42c7-8e70-a78ef9acebf7" />
-
-
-## Architecture
-- **main.py** — Application entry point, hotkey/gesture logic, tray integration
-- **ui.py** — PyQt5-based settings window for hotkeys and gestures
-- **trackpad_engine.py** — Multitouch gesture detection (via private MultitouchSupport.framework)
-- **hotkey_engine.py** — Global hotkey registration and action execution (Quartz, CoreDisplay)
-- **autolaunch.py** — Autostart management via LaunchAgents (plist in ~/Library/LaunchAgents)
-- **hotkeys.json** — User hotkey/gesture configuration
-- **icons/** — App icons and Info.plist for macOS bundle
-- **coredisplay_helper.c** — Helper for display brightness control (optional)
+- Native SwiftUI settings and `MenuBarExtra` UI.
+- Typed rules: trigger → action → exact application scope.
+- Global keyboard monitoring through a CoreGraphics event tap.
+- Three- and four-finger taps with deterministic swipe/long-press filtering.
+- Live touch visualization and a clear rejection reason for every tested gesture.
+- Precise, Balanced, Responsive, and Custom gesture profiles applied immediately.
+- Actions for URLs, applications, commands, key presses, and display brightness.
+- Exact bundle-identifier application matching.
+- Conflict validation before a rule can be saved.
+- Native Accessibility onboarding and `SMAppService` login item management.
+- Diagnostics screen with JSON export.
+- Automatic one-time import of the legacy Python configuration.
 
 ## Requirements
-- macOS 12 or later (Ventura/Sonoma recommended)
-- Python 3.12
-- Xcode Command Line Tools (for PyInstaller build)
 
-## Quick Start
-1. Create a virtual environment and install dependencies:
-   ```sh
-   make venv312
-   source venv312/bin/activate
-   ```
-2. Build the application:
-   ```sh
-   make build
-   ```
-3. Install to /Applications:
-   ```sh
-   make install
-   ```
+- macOS 13 or later.
+- Swift 6 toolchain or Xcode with the macOS SDK.
+- Accessibility permission for global keyboard shortcuts and generated keys.
 
-## Running
-- After installation, launch HotkeyMaster from Spotlight or the Applications folder.
-- The icon will appear in the system menu bar (tray).
+Raw trackpad contact data uses Apple's private
+`MultitouchSupport.framework`. Keyboard rules keep working if that framework or
+a physical trackpad is unavailable.
 
-## Accessibility Permissions
-Global hotkeys require "Accessibility" permissions:
-1. Open: System Settings → Privacy & Security → Accessibility
-2. Add HotkeyMaster and check the box
+## Build and test
 
-## Development
-- To run in development mode:
-  ```sh
-  source venv312/bin/activate
-  make run
-  ```
-- All hotkey/gesture changes are saved in `hotkeys.json`
+```sh
+make swift-build       # debug executable
+make check             # deterministic native checks
+make app               # release dist/HotkeyMaster.app, ad-hoc signed
+make install           # install the native app into /Applications
+```
 
-## Extending & Customization
-- Add new gestures (e.g., 5-finger tap) by editing `trackpad_engine.py`
-- Actions can be customized: app launch, URL open, open installed application (`open_app <Name>`), key emulation, brightness control, scripts
-- Tray menu and UI can be extended via `ui.py`
+The local Command Line Tools image does not ship `XCTest`/`Testing`, so the
+same deterministic checks are packaged as the `HotkeyMasterChecks` executable.
+A successful run prints `HotkeyMasterChecks: 10 checks passed`.
 
-## Troubleshooting & Limitations
-- Requires Accessibility permission for global hotkeys
-- Trackpad gestures use private APIs (may break in future macOS versions)
-- App is hidden from Dock and Cmd+Tab by default
-- For autostart, LaunchAgents plist is used (see `autolaunch.py`)
-- Known issue: Some system gestures may interfere with custom gestures (phantom tap filter reduces false positives)
-- If a previously saved `open_app` action showed a missing first letter, update to latest version (off‑by‑one slice fixed) and re-save the action.
+## Configuration migration
 
-## Dependencies
-- PyQt5, pyobjc, pynput, pystray, pillow
+The native configuration is stored at:
+
+```text
+~/Library/Application Support/HotkeyMaster/configuration-v2.json
+```
+
+On first launch, HotkeyMaster looks for the legacy `hotkeys.json` and
+`settings.json`, converts string actions and lowercase modifiers to typed data,
+resolves application names to bundle identifiers when possible, and writes the
+new configuration atomically. Legacy files are not deleted.
+
+## Architecture
+
+- `Sources/HotkeyMasterKit` — models, persistence, legacy importer, conflicts,
+  gesture classifier, replay format.
+- `Sources/HotkeyMaster` — SwiftUI UI and macOS services.
+- `Sources/CMultitouchBridge` — isolated private-framework C bridge.
+- `Tests/HotkeyMasterKitTests` — executable integration/replay checks.
+- `docs/swift-architecture.md` — boundaries and runtime invariants.
+
+## Legacy Python edition
+
+The root Python files are retained temporarily for behavioral reference and
+rollback only. They are intentionally not modified by the Swift rewrite. To run
+their existing checks while the migration is being validated:
+
+```sh
+make legacy-test
+```
 
 ## License
+
 MIT

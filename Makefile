@@ -1,61 +1,48 @@
-.PHONY: build clean run rebuild install codesign full-install full-rebuild venv312 test
+.PHONY: build swift-build check app run install clean test legacy-test legacy-run legacy-build venv312
 
 APP_NAME=HotkeyMaster
-DISPLAY_NAME="HotkeyMaster"
-SPEC_FILE=hotkeymaster.spec
-DIST_DIR=dist
-BUILD_DIR=build
-APP_BUNDLE=$(DIST_DIR)/$(APP_NAME).app
+APP_BUNDLE=dist/$(APP_NAME).app
 INSTALL_PATH=/Applications
 PYTHON=python3.12
 
-SIGN_IDENTITY=Developer ID Application: Rocker (TEAMID)
+build: app
 
-build:
-	clang -F /System/Library/PrivateFrameworks \
-    -I /System/Library/PrivateFrameworks/CoreDisplay.framework/Headers \
-    -framework CoreDisplay -framework CoreGraphics \
-    coredisplay_helper.c -o coredisplay_helper  # Компилируем C-хелпер
-	$(PYTHON) -m PyInstaller --clean --noconfirm $(SPEC_FILE)
+swift-build:
+	swift build --product HotkeyMaster
+
+check:
+	swift run HotkeyMasterChecks
+
+app: check
+	bash scripts/build-app.sh
+
+run: swift-build
+	.build/debug/HotkeyMaster
+
+install: app
+	ditto "$(APP_BUNDLE)" "$(INSTALL_PATH)/$(APP_NAME).app"
+	@echo "Installed $(INSTALL_PATH)/$(APP_NAME).app"
 
 clean:
-	rm -rf $(BUILD_DIR)/
-	rm -rf $(DIST_DIR)/
-	rm -fr __pycache__/
+	swift package clean
+	rm -rf dist/
 
-run:
+test: check legacy-test
+
+legacy-build:
+	clang coredisplay_helper.c -framework CoreGraphics -o coredisplay_helper
+	$(PYTHON) -m PyInstaller --clean --noconfirm hotkeymaster.spec
+
+legacy-run:
 	HOTKEYMASTER_DEV=1 $(PYTHON) main.py
 
-rebuild: clean build
-
-install: build # Добавлено 'build' как зависимость, чтобы хелпер точно был скомпилирован перед установкой
-	@echo "Installing $(DISPLAY_NAME) to $(INSTALL_PATH)/"
-	cp -a $(APP_BUNDLE) $(INSTALL_PATH)/
-	# Копируем скомпилированный хелпер внутрь бандла
-	cp coredisplay_helper $(INSTALL_PATH)/$(APP_NAME).app/Contents/MacOS/
-	codesign --force --deep --sign - $(INSTALL_PATH)/$(APP_NAME).app # Исправлена опечатка tcodesign -> codesign
-	@echo "Installed $(DISPLAY_NAME) to $(INSTALL_PATH)/"
-
-codesign:
-	@echo "Signing $(DISPLAY_NAME) with identity: $(SIGN_IDENTITY)"
-	codesign --deep --force --verify --verbose --sign "$(SIGN_IDENTITY)" "$(INSTALL_PATH)/$(APP_NAME).app"
-	@echo "Successfully signed $(DISPLAY_NAME)."
-
-full-install: build install codesign
-	@echo "Built, installed, and signed $(DISPLAY_NAME) successfully."
-
-full-rebuild: clean build install codesign
-	@echo "Cleaned, built, installed, and signed $(DISPLAY_NAME) successfully."
+legacy-test:
+	@if [ -x venv312/bin/python ]; then \
+		venv312/bin/python -m pytest -q; \
+	else \
+		$(PYTHON) -m pytest -q; \
+	fi
 
 venv312:
 	python3.12 -m venv venv312
-	. venv312/bin/activate && pip install -r requirements.txt && pip install pyinstaller
-
-test:
-	@echo "Running tests..."
-	@if [ -d venv312 ]; then \
-		. venv312/bin/activate && python -m pytest -q ; \
-	else \
-		($(PYTHON) -c "import pytest" 2>/dev/null || echo 'Pytest не найден. Создайте venv: make venv312') && $(PYTHON) -m pytest -q ; \
-	fi
-	@echo "Tests completed"
+	venv312/bin/pip install -r requirements.txt pyinstaller pytest

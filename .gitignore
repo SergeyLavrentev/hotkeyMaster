@@ -1,20 +1,22 @@
-# Ignore logs directory
+# Python legacy outputs
 logs/
-dist
-build
-.eggs
-
-# Ignore all .log files
+dist/
+build/
+.eggs/
 *.log
-
 movie_data_cache.json
 feeds.json
 settings.json
 read_articles.json
 group_settings.json
-# Ignore virtual environments
 venv/
-venv*
+venv*/
 ENV/
 env/
 __pycache__/
+.pytest_cache/
+
+# Swift/Xcode outputs
+.build/
+*.xcodeproj/
+.DS_Store
