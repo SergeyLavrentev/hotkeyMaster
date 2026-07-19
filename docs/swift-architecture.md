@@ -38,6 +38,9 @@ input format for first-launch migration.
   reports that Accessibility is trusted.
 - Dismissing onboarding suppresses it only for the current run; a later launch
   asks again until the required permission is actually granted.
+- Onboarding and settings move to the active Space and are full-screen
+  auxiliaries, so opening them from the menu bar cannot strand the window on a
+  different desktop behind a full-screen application.
 
 ## Gesture invariants
 

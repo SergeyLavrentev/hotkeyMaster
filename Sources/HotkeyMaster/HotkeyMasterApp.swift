@@ -97,6 +97,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         let window = NSWindow(contentViewController: controller)
         window.title = "HotkeyMaster — Настройки"
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+        window.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
         window.setContentSize(NSSize(width: 940, height: 610))
         window.center()
         window.delegate = self

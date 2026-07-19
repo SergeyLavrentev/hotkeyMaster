@@ -42,6 +42,7 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
         let window = NSWindow(contentViewController: controller)
         window.title = "Добро пожаловать в HotkeyMaster"
         window.styleMask = [.titled, .closable]
+        window.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
         window.setContentSize(NSSize(width: 620, height: 520))
         window.center()
         window.isReleasedWhenClosed = false
