@@ -20,8 +20,7 @@ run: swift-build
 	.build/debug/HotkeyMaster
 
 install: app
-	ditto "$(APP_BUNDLE)" "$(INSTALL_PATH)/$(APP_NAME).app"
-	@echo "Installed $(INSTALL_PATH)/$(APP_NAME).app"
+	bash scripts/install-app.sh
 
 clean:
 	swift package clean

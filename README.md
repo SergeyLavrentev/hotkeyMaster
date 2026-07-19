@@ -39,6 +39,12 @@ make app               # release dist/HotkeyMaster.app, ad-hoc signed
 make install           # install the native app into /Applications
 ```
 
+`make install` first copies the existing application to
+`~/Library/Application Support/HotkeyMaster/LegacyBackup/`, stages and verifies
+the new bundle, and restores the previous bundle automatically if installation
+fails. The destination is replaced rather than merged, so legacy Python files
+cannot remain inside the Swift bundle.
+
 The local Command Line Tools image does not ship `XCTest`/`Testing`, so the
 same deterministic checks are packaged as the `HotkeyMasterChecks` executable.
 A successful run prints `HotkeyMasterChecks: 10 checks passed`.
