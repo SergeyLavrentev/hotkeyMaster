@@ -7,9 +7,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         AppModel.shared.start()
-        if ProcessInfo.processInfo.environment["HOTKEYMASTER_SHOW_SETTINGS"] == "1" {
+        let environment = ProcessInfo.processInfo.environment
+        if environment["HOTKEYMASTER_SHOW_SETTINGS"] == "1" {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
                 SettingsWindowController.shared.show()
+            }
+        } else if environment["HOTKEYMASTER_SKIP_ONBOARDING"] != "1" {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                OnboardingWindowController.shared.showIfNeeded()
             }
         }
         let center = NSWorkspace.shared.notificationCenter
@@ -28,6 +33,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidBecomeActive(_ notification: Notification) {
         AppModel.shared.refreshPermissions()
+        OnboardingWindowController.shared.permissionStatusDidChange()
     }
 }
 
@@ -74,7 +80,7 @@ private struct StatusMenuView: View {
 }
 
 @MainActor
-private final class SettingsWindowController: NSObject, NSWindowDelegate {
+final class SettingsWindowController: NSObject, NSWindowDelegate {
     static let shared = SettingsWindowController()
     private var window: NSWindow?
 

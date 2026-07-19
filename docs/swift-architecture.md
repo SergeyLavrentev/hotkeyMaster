@@ -27,6 +27,18 @@ input format for first-launch migration.
    in-memory diagnostic log.
 5. Gesture preference changes update the live classifier immediately.
 
+## Permission onboarding
+
+- Startup never opens System Settings without an explicit click from the user.
+- If Accessibility is missing, a native onboarding window explains the reason,
+  offers a non-blocking “Later” path, and polls the trusted-process status while
+  it is visible.
+- Returning to the app refreshes permissions and retries creation of the global
+  keyboard event tap. The onboarding completes only after the current process
+  reports that Accessibility is trusted.
+- Dismissing onboarding suppresses it only for the current run; a later launch
+  asks again until the required permission is actually granted.
+
 ## Gesture invariants
 
 - Three- and four-finger taps are supported by default.

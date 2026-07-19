@@ -43,7 +43,15 @@ make install           # install the native app into /Applications
 `~/Library/Application Support/HotkeyMaster/LegacyBackup/`, stages and verifies
 the new bundle, and restores the previous bundle automatically if installation
 fails. The destination is replaced rather than merged, so legacy Python files
-cannot remain inside the Swift bundle.
+cannot remain inside the Swift bundle. Calling `scripts/install-app.sh` directly
+also refuses to install when Swift sources or bundle resources are newer than
+the release binary, preventing an accidental stale installation.
+
+On the first startup without Accessibility permission, HotkeyMaster shows a
+short native onboarding window before opening System Settings. It explains why
+the permission is needed, checks the status again after the user returns, and
+does not require an application restart. Choosing “Позже” dismisses the window
+for the current run; it appears again on the next launch until access is granted.
 
 The local Command Line Tools image does not ship `XCTest`/`Testing`, so the
 same deterministic checks are packaged as the `HotkeyMasterChecks` executable.

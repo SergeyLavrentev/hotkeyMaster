@@ -16,6 +16,18 @@ if [ ! -d "$SOURCE_APP" ]; then
     exit 1
 fi
 
+SOURCE_BINARY="$SOURCE_APP/Contents/MacOS/HotkeyMaster"
+if [ ! -x "$SOURCE_BINARY" ]; then
+    echo "Missing executable $SOURCE_BINARY; run make app first" >&2
+    exit 1
+fi
+
+NEWER_INPUT="$(find "$ROOT/Sources" "$ROOT/Package.swift" "$ROOT/Resources" "$ROOT/scripts/build-app.sh" -newer "$SOURCE_BINARY" -print -quit)"
+if [ -n "$NEWER_INPUT" ]; then
+    echo "Stale $SOURCE_APP: $NEWER_INPUT is newer; run make app first" >&2
+    exit 1
+fi
+
 mkdir -p "$BACKUP_ROOT"
 rm -rf "$STAGING_APP" "$PREVIOUS_APP"
 ditto "$SOURCE_APP" "$STAGING_APP"
