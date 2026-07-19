@@ -25,6 +25,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AppModel.shared.stop()
         observers.forEach(NSWorkspace.shared.notificationCenter.removeObserver)
     }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        AppModel.shared.refreshPermissions()
+    }
 }
 
 @main

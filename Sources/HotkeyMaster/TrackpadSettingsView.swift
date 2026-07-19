@@ -45,6 +45,8 @@ struct TrackpadSettingsView: View {
             }
             .padding(22)
         }
+        .onAppear { model.setGestureCalibrationActive(true) }
+        .onDisappear { model.setGestureCalibrationActive(false) }
     }
 
     private var calibrationCard: some View {
@@ -61,6 +63,12 @@ struct TrackpadSettingsView: View {
                         Label("Ожидаю жест…", systemImage: "circle.dotted").foregroundStyle(.secondary)
                     }
                     Spacer()
+                    HStack {
+                        Text("Успешно: \(model.calibrationSuccesses) из \(model.calibrationAttempts)")
+                            .font(.callout).monospacedDigit()
+                        Button("Начать заново") { model.resetGestureCalibration() }
+                            .buttonStyle(.link)
+                    }
                     Text("Точек касания сейчас: \(model.lastFrame.contacts.filter { $0.state != .lifted }.count)")
                         .font(.caption).monospacedDigit().foregroundStyle(.secondary)
                 }

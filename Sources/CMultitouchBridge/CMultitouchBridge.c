@@ -31,8 +31,8 @@ typedef void (*MTDeviceStopFn)(void *);
 
 struct HMTrackpad {
     void *framework;
-    void *device;
     CFArrayRef devices;
+    CFIndex deviceCount;
     HMTouchFrameCallback callback;
     void *context;
     MTRegisterContactFrameCallbackFn registerCallback;
@@ -114,7 +114,7 @@ HMTrackpad *HMTrackpadCreate(HMTouchFrameCallback callback, void *context, char 
         HMTrackpadDestroy(trackpad);
         return NULL;
     }
-    trackpad->device = (void *)CFArrayGetValueAtIndex(trackpad->devices, 0);
+    trackpad->deviceCount = CFArrayGetCount(trackpad->devices);
     trackpad->callback = callback;
     trackpad->context = context;
     return trackpad;
@@ -131,17 +131,23 @@ bool HMTrackpadStart(HMTrackpad *trackpad, char **errorMessage) {
         return false;
     }
     activeTrackpad = trackpad;
-    trackpad->registerCallback(trackpad->device, contactFrameCallback);
-    trackpad->deviceStart(trackpad->device, 0);
+    for (CFIndex index = 0; index < trackpad->deviceCount; index++) {
+        void *device = (void *)CFArrayGetValueAtIndex(trackpad->devices, index);
+        trackpad->registerCallback(device, contactFrameCallback);
+        trackpad->deviceStart(device, 0);
+    }
     trackpad->started = true;
     return true;
 }
 
 void HMTrackpadStop(HMTrackpad *trackpad) {
     if (trackpad == NULL || !trackpad->started) return;
-    if (trackpad->deviceStop != NULL) trackpad->deviceStop(trackpad->device);
-    if (trackpad->unregisterCallback != NULL) {
-        trackpad->unregisterCallback(trackpad->device, contactFrameCallback);
+    for (CFIndex index = 0; index < trackpad->deviceCount; index++) {
+        void *device = (void *)CFArrayGetValueAtIndex(trackpad->devices, index);
+        if (trackpad->deviceStop != NULL) trackpad->deviceStop(device);
+        if (trackpad->unregisterCallback != NULL) {
+            trackpad->unregisterCallback(device, contactFrameCallback);
+        }
     }
     trackpad->started = false;
     if (activeTrackpad == trackpad) activeTrackpad = NULL;

@@ -37,6 +37,10 @@ input format for first-launch migration.
 - Classifier state is reset after every completed or cancelled sequence.
 - The frame callback never runs actions directly; UI/rule evaluation is sent
   to the main actor.
+- Every connected multitouch device is registered; the classifier receives a
+  single normalized stream regardless of built-in or external trackpad.
+- Opening Trackpad settings enters calibration mode: classifications and
+  metrics are recorded, but matching production actions are suppressed.
 
 `MultitouchSupport.framework` is private and can change between macOS releases.
 Keeping it behind the C bridge makes failure visible and allows the rest of the

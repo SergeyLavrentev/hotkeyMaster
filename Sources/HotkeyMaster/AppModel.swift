@@ -10,6 +10,8 @@ final class AppModel: ObservableObject {
     @Published var selectedRuleID: Rule.ID?
     @Published var lastFrame = TouchFrame(timestamp: 0, contacts: [])
     @Published var lastClassification: GestureClassification?
+    @Published var calibrationAttempts = 0
+    @Published var calibrationSuccesses = 0
     @Published var accessibilityGranted = PermissionManager.accessibilityGranted
     @Published var availableApplications: [ApplicationReference] = []
     @Published var migrationWarnings: [String] = []
@@ -22,6 +24,7 @@ final class AppModel: ObservableObject {
     private var lastGestureFire: [GestureKind: TimeInterval] = [:]
     private var saveWorkItem: DispatchWorkItem?
     private var hasStarted = false
+    private var isCalibratingGestures = false
 
     private init() {
         configuration = Configuration()
@@ -109,7 +112,21 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func refreshPermissions() { accessibilityGranted = PermissionManager.accessibilityGranted }
+    func refreshPermissions() {
+        accessibilityGranted = PermissionManager.accessibilityGranted
+        if accessibilityGranted { keyboardMonitor?.start() }
+    }
+
+    func setGestureCalibrationActive(_ active: Bool) {
+        isCalibratingGestures = active
+        if active { resetGestureCalibration() }
+    }
+
+    func resetGestureCalibration() {
+        calibrationAttempts = 0
+        calibrationSuccesses = 0
+        lastClassification = nil
+    }
 
     func persistNow() {
         saveWorkItem?.cancel()
@@ -169,6 +186,11 @@ final class AppModel: ObservableObject {
         switch result {
         case .recognized(let gesture, let metrics):
             diagnostics.append(.success, category: "Жест", message: "Распознан: \(gesture.displayName)", details: Self.metricsDescription(metrics))
+            if isCalibratingGestures {
+                calibrationAttempts += 1
+                calibrationSuccesses += 1
+                return
+            }
             let now = ProcessInfo.processInfo.systemUptime
             let delay = configuration.preferences.effectiveGestureThresholds.repeatDelay
             if let last = lastGestureFire[gesture], now - last < delay {
@@ -181,6 +203,7 @@ final class AppModel: ObservableObject {
             }
         case .rejected(let reason, let metrics):
             diagnostics.append(.warning, category: "Жест", message: "Отклонён", details: [reason.message, metrics.map(Self.metricsDescription)].compactMap { $0 }.joined(separator: " "))
+            if isCalibratingGestures { calibrationAttempts += 1 }
         }
     }
 
