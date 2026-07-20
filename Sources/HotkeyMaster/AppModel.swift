@@ -12,6 +12,8 @@ final class AppModel: ObservableObject {
     @Published var lastClassification: GestureClassification?
     @Published var calibrationAttempts = 0
     @Published var calibrationSuccesses = 0
+    @Published var calibrationThreeFingerSuccesses = 0
+    @Published var calibrationFourFingerSuccesses = 0
     @Published var accessibilityGranted = PermissionManager.accessibilityGranted
     @Published var availableApplications: [ApplicationReference] = []
     @Published var migrationWarnings: [String] = []
@@ -125,6 +127,8 @@ final class AppModel: ObservableObject {
     func resetGestureCalibration() {
         calibrationAttempts = 0
         calibrationSuccesses = 0
+        calibrationThreeFingerSuccesses = 0
+        calibrationFourFingerSuccesses = 0
         lastClassification = nil
     }
 
@@ -182,6 +186,13 @@ final class AppModel: ObservableObject {
     }
 
     private func handleGestureClassification(_ result: GestureClassification) {
+        if case .rejected(.experimentalGestureDisabled, _) = result,
+           !configuration.preferences.experimentalGestures {
+            return
+        }
+        if isCalibratingGestures, !Self.isPrimaryCalibrationGesture(result) {
+            return
+        }
         lastClassification = result
         switch result {
         case .recognized(let gesture, let metrics):
@@ -189,6 +200,8 @@ final class AppModel: ObservableObject {
             if isCalibratingGestures {
                 calibrationAttempts += 1
                 calibrationSuccesses += 1
+                if gesture == .threeFingerTap { calibrationThreeFingerSuccesses += 1 }
+                if gesture == .fourFingerTap { calibrationFourFingerSuccesses += 1 }
                 return
             }
             let now = ProcessInfo.processInfo.systemUptime
@@ -226,6 +239,15 @@ final class AppModel: ObservableObject {
 
     private static func metricsDescription(_ metrics: GestureMetrics) -> String {
         String(format: "%d пальца, %.0f мс, движение %.3f, центр %.3f", metrics.fingerCount, metrics.duration * 1000, metrics.maximumFingerMovement, metrics.centroidMovement)
+    }
+
+    private static func isPrimaryCalibrationGesture(_ result: GestureClassification) -> Bool {
+        switch result {
+        case .recognized(let gesture, _):
+            return gesture == .threeFingerTap || gesture == .fourFingerTap
+        case .rejected(_, let metrics):
+            return metrics.map { $0.fingerCount == 3 || $0.fingerCount == 4 } ?? false
+        }
     }
 
     private static let defaultRules: [Rule] = [

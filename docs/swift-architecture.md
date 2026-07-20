@@ -56,6 +56,9 @@ input format for first-launch migration.
   single normalized stream regardless of built-in or external trackpad.
 - Opening Trackpad settings enters calibration mode: classifications and
   metrics are recorded, but matching production actions are suppressed.
+- Calibration ignores ordinary one- and two-finger contacts, reports three-
+  and four-finger successes separately, and therefore cannot claim readiness
+  after repeatedly recognizing only one of the two primary gestures.
 
 `MultitouchSupport.framework` is private and can change between macOS releases.
 Keeping it behind the C bridge makes failure visible and allows the rest of the

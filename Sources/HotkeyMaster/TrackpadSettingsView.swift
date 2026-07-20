@@ -63,12 +63,15 @@ struct TrackpadSettingsView: View {
                         Label("Ожидаю жест…", systemImage: "circle.dotted").foregroundStyle(.secondary)
                     }
                     Spacer()
-                    HStack {
-                        Text("Успешно: \(model.calibrationSuccesses) из \(model.calibrationAttempts)")
-                            .font(.callout).monospacedDigit()
+                    HStack(spacing: 14) {
+                        calibrationResult("3 пальца", count: model.calibrationThreeFingerSuccesses)
+                        calibrationResult("4 пальца", count: model.calibrationFourFingerSuccesses)
+                        Spacer()
                         Button("Начать заново") { model.resetGestureCalibration() }
                             .buttonStyle(.link)
                     }
+                    Text("Целевых попыток: \(model.calibrationAttempts) · успешно: \(model.calibrationSuccesses)")
+                        .font(.caption).monospacedDigit().foregroundStyle(.secondary)
                     Text("Точек касания сейчас: \(model.lastFrame.contacts.filter { $0.state != .lifted }.count)")
                         .font(.caption).monospacedDigit().foregroundStyle(.secondary)
                 }
@@ -76,6 +79,13 @@ struct TrackpadSettingsView: View {
             }
             .padding(10)
         }
+    }
+
+    private func calibrationResult(_ title: String, count: Int) -> some View {
+        Label("\(title): \(count)", systemImage: count > 0 ? "checkmark.circle.fill" : "circle")
+            .font(.callout.weight(.medium))
+            .foregroundStyle(count > 0 ? .green : .secondary)
+            .monospacedDigit()
     }
 
     @ViewBuilder private func classificationView(_ result: GestureClassification) -> some View {
