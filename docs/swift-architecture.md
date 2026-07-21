@@ -13,6 +13,9 @@ input format for first-launch migration.
 - `CMultitouchBridge` is the only module that calls the private
   `MultitouchSupport.framework`. It converts framework-specific frames to a
   small stable C structure consumed by Swift.
+- The bridge ignores hover/range phases and maps the physical touch lifecycle
+  (`MakeTouch`/`Touching`/`BreakTouch`, raw states 3/4/5) to the stable Swift
+  lifecycle (`touching`/`moving`/`lifted`, values 1/2/4).
 - `HotkeyMasterChecks` runs deterministic classifier, persistence, migration,
   and conflict checks without a physical trackpad.
 

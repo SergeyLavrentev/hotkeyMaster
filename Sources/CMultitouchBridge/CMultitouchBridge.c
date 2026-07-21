@@ -3,6 +3,7 @@
 #include <CoreFoundation/CoreFoundation.h>
 #include <dlfcn.h>
 #include <math.h>
+#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -11,9 +12,10 @@ typedef struct { MTPoint pos; MTPoint vel; } MTReadout;
 typedef struct {
     int32_t frame;
     double timestamp;
-    int32_t identifier;
-    int32_t state;
-    int32_t pad1[4];
+    int32_t pathIndex;
+    uint32_t state;
+    int32_t fingerID;
+    int32_t handID;
     MTReadout normalized;
     float size;
     int32_t pad2;
@@ -23,9 +25,18 @@ typedef struct {
     int32_t pad3[5];
 } MTFinger;
 
+_Static_assert(offsetof(MTFinger, normalized) == 32, "Unexpected MTFinger layout");
+
+enum {
+    MTTouchStateMakeTouch = 3,
+    MTTouchStateTouching = 4,
+    MTTouchStateBreakTouch = 5,
+};
+
 typedef CFArrayRef (*MTDeviceCreateListFn)(void);
-typedef void (*MTRegisterContactFrameCallbackFn)(void *, void (*)(void *, MTFinger *, int, double, int));
-typedef void (*MTUnregisterContactFrameCallbackFn)(void *, void (*)(void *, MTFinger *, int, double, int));
+typedef void (*MTFrameCallbackFn)(void *, MTFinger *, size_t, double, size_t);
+typedef void (*MTRegisterContactFrameCallbackFn)(void *, MTFrameCallbackFn);
+typedef void (*MTUnregisterContactFrameCallbackFn)(void *, MTFrameCallbackFn);
 typedef void (*MTDeviceStartFn)(void *, int);
 typedef void (*MTDeviceStopFn)(void *);
 
@@ -63,21 +74,38 @@ bool HMTrackpadFrameworkAvailable(void) {
     return true;
 }
 
-static void contactFrameCallback(void *device, MTFinger *fingers, int count, double timestamp, int frame) {
+static void contactFrameCallback(void *device, MTFinger *fingers, size_t count, double timestamp, size_t frame) {
     (void)device;
     (void)frame;
     HMTrackpad *trackpad = activeTrackpad;
     if (trackpad == NULL || trackpad->callback == NULL || count < 0) return;
 
-    const int safeCount = count > 32 ? 32 : count;
+    const size_t inputCount = count > 32 ? 32 : count;
     HMTouchContact contacts[32];
-    for (int index = 0; index < safeCount; index++) {
-        contacts[index].identifier = fingers[index].identifier;
-        contacts[index].state = fingers[index].state;
-        contacts[index].x = fingers[index].normalized.pos.x;
-        contacts[index].y = fingers[index].normalized.pos.y;
+    int32_t outputCount = 0;
+    for (size_t index = 0; index < inputCount; index++) {
+        int32_t canonicalState;
+        switch (fingers[index].state) {
+        case MTTouchStateMakeTouch:
+            canonicalState = 1;
+            break;
+        case MTTouchStateTouching:
+            canonicalState = 2;
+            break;
+        case MTTouchStateBreakTouch:
+            canonicalState = 4;
+            break;
+        default:
+            // Hover/range phases are not physical contact and must not start a tap.
+            continue;
+        }
+        contacts[outputCount].identifier = fingers[index].pathIndex;
+        contacts[outputCount].state = canonicalState;
+        contacts[outputCount].x = fingers[index].normalized.pos.x;
+        contacts[outputCount].y = fingers[index].normalized.pos.y;
+        outputCount++;
     }
-    trackpad->callback(contacts, (int32_t)safeCount, timestamp, trackpad->context);
+    trackpad->callback(contacts, outputCount, timestamp, trackpad->context);
 }
 
 HMTrackpad *HMTrackpadCreate(HMTouchFrameCallback callback, void *context, char **errorMessage) {

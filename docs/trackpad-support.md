@@ -127,9 +127,10 @@ class Finger(ctypes.Structure):
     _fields_ = [
         ("frame",      ctypes.c_int32),    # номер кадра
         ("timestamp",  ctypes.c_double),   # время (секунд с boot-time)
-        ("identifier", ctypes.c_int32),    # ID пальца, уникален пока палец на стекле
-        ("state",      ctypes.c_int32),    # 1=DOWN, 2=MOVE, 4=UP
-        ("_pad1",      ctypes.c_int32 * 4),
+        ("path_index", ctypes.c_int32),    # ID контакта в текущей последовательности
+        ("state",      ctypes.c_int32),    # 3=MakeTouch, 4=Touching, 5=BreakTouch
+        ("finger_id",  ctypes.c_int32),
+        ("hand_id",    ctypes.c_int32),
         ("norm",       MTReadout),         # нормализованные координаты
         ("size",       ctypes.c_float),    # «площадь» касания (можно игнорировать)
         ("_pad2",      ctypes.c_int32),
@@ -288,4 +289,3 @@ System Settings → Privacy & Security → Input Monitoring
 * Лёгко модифицируется под любые кастомные жесты — у вас уже поток сырых пальцев.
 
 _Копируйте, форкайте, улучшайте. Happy hacking!_
-
