@@ -17,15 +17,19 @@ typedef struct {
     int32_t fingerID;
     int32_t handID;
     MTReadout normalized;
-    float size;
-    int32_t pad2;
+    float zTotal;
+    int32_t field9;
     float angle;
     float major;
     float minor;
-    int32_t pad3[5];
+    MTReadout absolute;
+    int32_t field14;
+    int32_t field15;
+    float zDensity;
 } MTFinger;
 
 _Static_assert(offsetof(MTFinger, normalized) == 32, "Unexpected MTFinger layout");
+_Static_assert(sizeof(MTFinger) == 96, "Unexpected MTFinger stride");
 
 enum {
     MTTouchStateMakeTouch = 3,

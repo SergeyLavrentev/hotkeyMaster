@@ -132,12 +132,15 @@ class Finger(ctypes.Structure):
         ("finger_id",   ctypes.c_int32),
         ("hand_id",     ctypes.c_int32),
         ("norm",       MTReadout),         # нормализованные координаты
-        ("size",       ctypes.c_float),    # «площадь» касания (можно игнорировать)
-        ("_pad2",      ctypes.c_int32),
+        ("z_total",    ctypes.c_float),    # качество касания
+        ("field9",     ctypes.c_int32),
         ("angle",      ctypes.c_float),    # угол пальца
         ("major",      ctypes.c_float),    # большая ось эллипса касания
         ("minor",      ctypes.c_float),    # малая ось
-        ("_pad3",      ctypes.c_int32 * 5),
+        ("absolute",   MTReadout),
+        ("field14",    ctypes.c_int32),
+        ("field15",    ctypes.c_int32),
+        ("z_density",  ctypes.c_float),
     ]
 
 ## 4. Детект «тапа» и отправка шорткатов
