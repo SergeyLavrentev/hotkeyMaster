@@ -78,7 +78,7 @@ static void contactFrameCallback(void *device, MTFinger *fingers, size_t count, 
     (void)device;
     (void)frame;
     HMTrackpad *trackpad = activeTrackpad;
-    if (trackpad == NULL || trackpad->callback == NULL || count < 0) return;
+    if (trackpad == NULL || trackpad->callback == NULL) return;
 
     const size_t inputCount = count > 32 ? 32 : count;
     HMTouchContact contacts[32];

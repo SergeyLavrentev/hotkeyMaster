@@ -128,9 +128,9 @@ class Finger(ctypes.Structure):
         ("frame",      ctypes.c_int32),    # номер кадра
         ("timestamp",  ctypes.c_double),   # время (секунд с boot-time)
         ("path_index", ctypes.c_int32),    # ID контакта в текущей последовательности
-        ("state",      ctypes.c_int32),    # 3=MakeTouch, 4=Touching, 5=BreakTouch
-        ("finger_id",  ctypes.c_int32),
-        ("hand_id",    ctypes.c_int32),
+        ("state",       ctypes.c_int32),    # 3=MakeTouch, 4=Touching, 5=BreakTouch
+        ("finger_id",   ctypes.c_int32),
+        ("hand_id",     ctypes.c_int32),
         ("norm",       MTReadout),         # нормализованные координаты
         ("size",       ctypes.c_float),    # «площадь» касания (можно игнорировать)
         ("_pad2",      ctypes.c_int32),
