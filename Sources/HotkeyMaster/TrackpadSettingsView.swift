@@ -3,10 +3,16 @@ import SwiftUI
 
 struct TrackpadSettingsView: View {
     @EnvironmentObject private var model: AppModel
-    @State private var showAdvanced = false
 
     private var preferences: Binding<Preferences> {
         Binding(get: { model.configuration.preferences }, set: { model.configuration.preferences = $0; model.preferencesChanged() })
+    }
+
+    private var gesturePreset: Binding<GesturePreset> {
+        Binding(
+            get: { model.configuration.preferences.gesturePreset },
+            set: { model.setGesturePreset($0) }
+        )
     }
 
     var body: some View {
@@ -19,19 +25,14 @@ struct TrackpadSettingsView: View {
                 calibrationCard
                 GroupBox("Профиль распознавания") {
                     VStack(alignment: .leading, spacing: 14) {
-                        Picker("Профиль", selection: preferences.gesturePreset) {
+                        Picker("Профиль", selection: gesturePreset) {
                             ForEach(GesturePreset.allCases.filter { $0 != .custom }) { Text($0.displayName).tag($0) }
                         }
                         .pickerStyle(.segmented)
                         Text(presetDescription).font(.callout).foregroundStyle(.secondary)
-                        DisclosureGroup("Дополнительные параметры", isExpanded: $showAdvanced) {
-                            AdvancedThresholdsView(thresholds: preferences.customGestureThresholds)
-                                .padding(.top, 10)
-                            Button("Использовать эти параметры") {
-                                model.configuration.preferences.gesturePreset = .custom
-                                model.preferencesChanged()
-                            }
-                        }
+                        Label("Параметры длительности и движения подбираются автоматически.", systemImage: "slider.horizontal.3")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                     .padding(8)
                 }
@@ -90,43 +91,39 @@ struct TrackpadSettingsView: View {
 
     @ViewBuilder private func classificationView(_ result: GestureClassification) -> some View {
         switch result {
-        case .recognized(let gesture, let metrics):
+        case .recognized(let gesture, _):
             Label(gesture.displayName, systemImage: "checkmark.circle.fill").foregroundStyle(.green).font(.headline)
-            Text(String(format: "%.0f мс · движение %.3f · центр %.3f", metrics.duration * 1000, metrics.maximumFingerMovement, metrics.centroidMovement))
-                .font(.caption).monospacedDigit().foregroundStyle(.secondary)
+            Text("Профиль уверенно распознал этот тап.")
+                .font(.callout).foregroundStyle(.secondary)
         case .rejected(let reason, _):
             Label("Жест отклонён", systemImage: "xmark.circle.fill").foregroundStyle(.orange).font(.headline)
-            Text(reason.message).font(.callout).foregroundStyle(.secondary)
+            Text(calibrationExplanation(for: reason)).font(.callout).foregroundStyle(.secondary)
+        }
+    }
+
+    private func calibrationExplanation(for reason: GestureRejectionReason) -> String {
+        switch reason {
+        case .tooLong:
+            return "Касание получилось слишком долгим для выбранного профиля."
+        case .fingersStartedTooFarApart:
+            return "Пальцы коснулись трекпада не одновременно."
+        case .fingerMovedTooFar, .centroidMovedTooFar:
+            return "Это больше похоже на движение. Попробуйте короткий тап или более отзывчивый профиль."
+        case .unsupportedFingerCount(let count):
+            return "Обнаружено пальцев: \(count). Используйте три или четыре."
+        case .experimentalGestureDisabled:
+            return "Этот жест отключён в экспериментальных настройках."
+        case .incompleteFrameSequence:
+            return "Трекпад передал неполные данные. Попробуйте ещё раз."
         }
     }
 
     private var presetDescription: String {
         switch model.configuration.preferences.gesturePreset {
-        case .precise: return "Минимум ложных срабатываний. Требует короткого и аккуратного тапа."
-        case .balanced: return "Рекомендуемый баланс между надёжностью и удобством."
-        case .responsive: return "Легче распознаёт быстрые и неточные тапы, но требует проверки системных свайпов."
-        case .custom: return "Используются ваши расширенные параметры."
-        }
-    }
-}
-
-private struct AdvancedThresholdsView: View {
-    @Binding var thresholds: GestureThresholds
-    var body: some View {
-        VStack(spacing: 9) {
-            threshold("Максимальная длительность", value: $thresholds.maximumDuration, range: 0.15...0.5, format: { String(format: "%.0f мс", $0 * 1000) })
-            threshold("Движение пальца", value: $thresholds.maximumFingerMovement, range: 0.02...0.18, format: { String(format: "%.3f", $0) })
-            threshold("Движение центра", value: $thresholds.maximumCentroidMovement, range: 0.01...0.10, format: { String(format: "%.3f", $0) })
-            threshold("Одновременность", value: $thresholds.maximumStartSpread, range: 0.03...0.2, format: { String(format: "%.0f мс", $0 * 1000) })
-            threshold("Повтор", value: $thresholds.repeatDelay, range: 0.1...1, format: { String(format: "%.0f мс", $0 * 1000) })
-        }
-    }
-
-    private func threshold(_ name: String, value: Binding<Double>, range: ClosedRange<Double>, format: @escaping (Double) -> String) -> some View {
-        HStack {
-            Text(name).frame(width: 190, alignment: .leading)
-            Slider(value: value, in: range)
-            Text(format(value.wrappedValue)).monospacedDigit().frame(width: 65, alignment: .trailing)
+        case .precise: return "Строже отличает тап от движения и реже срабатывает случайно."
+        case .balanced: return "Рекомендуемый режим: уверенно распознаёт обычный тап без лишних срабатываний."
+        case .responsive: return "Прощает более долгий и неточный тап, поэтому реагирует легче."
+        case .custom: return "Старый пользовательский профиль. Выберите один из готовых режимов."
         }
     }
 }

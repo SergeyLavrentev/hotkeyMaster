@@ -50,5 +50,14 @@ codesign --verify --deep --strict "$DESTINATION"
 trap - ERR
 rm -rf "$PREVIOUS_APP"
 
+# Native builds use SMAppService. Remove the old Python-era LaunchAgent so
+# macOS does not invoke the same bundle a second time at login.
+LEGACY_LAUNCH_AGENT="$HOME/Library/LaunchAgents/com.slavrentev.hotkeymaster.plist"
+if [ -f "$LEGACY_LAUNCH_AGENT" ]; then
+    launchctl bootout "gui/$(id -u)/com.slavrentev.hotkeymaster" 2>/dev/null || true
+    rm -f "$LEGACY_LAUNCH_AGENT"
+    echo "Removed legacy startup item: $LEGACY_LAUNCH_AGENT"
+fi
+
 echo "Installed: $DESTINATION"
 if [ -d "$BACKUP_APP" ]; then echo "Legacy backup: $BACKUP_APP"; fi

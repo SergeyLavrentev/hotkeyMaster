@@ -177,18 +177,18 @@ public struct GestureThresholds: Codable, Equatable, Sendable {
     }
 
     public static let precise = GestureThresholds(
-        maximumDuration: 0.23, maximumFingerMovement: 0.055,
-        maximumCentroidMovement: 0.030, maximumStartSpread: 0.075,
+        maximumDuration: 0.32, maximumFingerMovement: 0.075,
+        maximumCentroidMovement: 0.050, maximumStartSpread: 0.12,
         minimumReleaseGap: 0.035, repeatDelay: 0.55
     )
     public static let balanced = GestureThresholds(
-        maximumDuration: 0.30, maximumFingerMovement: 0.085,
-        maximumCentroidMovement: 0.045, maximumStartSpread: 0.105,
+        maximumDuration: 0.42, maximumFingerMovement: 0.11,
+        maximumCentroidMovement: 0.075, maximumStartSpread: 0.16,
         minimumReleaseGap: 0.025, repeatDelay: 0.38
     )
     public static let responsive = GestureThresholds(
-        maximumDuration: 0.36, maximumFingerMovement: 0.12,
-        maximumCentroidMovement: 0.065, maximumStartSpread: 0.14,
+        maximumDuration: 0.55, maximumFingerMovement: 0.15,
+        maximumCentroidMovement: 0.10, maximumStartSpread: 0.20,
         minimumReleaseGap: 0.015, repeatDelay: 0.22
     )
 }

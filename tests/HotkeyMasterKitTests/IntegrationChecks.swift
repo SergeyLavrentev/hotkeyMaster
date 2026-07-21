@@ -17,11 +17,13 @@ struct HotkeyMasterChecks {
         try rejectsNonSimultaneousFingers()
         try checksExperimentalGestureGate()
         try checksGestureIsolation()
+        try recognizesFourFingerTapWithSequentialRelease()
+        try checksPresetOrdering()
         try checksConfigurationRoundTrip()
         try checksLegacyImport()
         try checksConflicts()
         try checksBundleIdentifierScopes()
-        print("HotkeyMasterChecks: 10 checks passed")
+        print("HotkeyMasterChecks: 12 checks passed")
     }
 
     static func require(_ condition: @autoclosure () -> Bool, _ message: String) throws {
@@ -53,7 +55,7 @@ struct HotkeyMasterChecks {
     }
 
     static func rejectsLongPress() throws {
-        let result = replay([frame(0, touching: points(4, offset: 0)), frame(0.4, lifted: points(4, offset: 0))])
+        let result = replay([frame(0, touching: points(4, offset: 0)), frame(0.6, lifted: points(4, offset: 0))])
         guard case .rejected(.tooLong, _) = result else { throw CheckFailure.failed("Long press was not rejected") }
     }
 
@@ -79,11 +81,37 @@ struct HotkeyMasterChecks {
 
     static func checksGestureIsolation() throws {
         let classifier = GestureClassifier()
-        _ = replay([frame(0, touching: points(3, offset: 0)), frame(0.4, lifted: points(3, offset: 0))], classifier: classifier)
+        _ = replay([frame(0, touching: points(3, offset: 0)), frame(0.6, lifted: points(3, offset: 0))], classifier: classifier)
         guard case .recognized(.fourFingerTap, let metrics) = replay([frame(1, touching: points(4, offset: 0)), frame(1.1, lifted: points(4, offset: 0))], classifier: classifier) else {
             throw CheckFailure.failed("Gesture state leaked into the next gesture")
         }
         try require(metrics.fingerCount == 4, "Gesture state was not isolated")
+    }
+
+    static func recognizesFourFingerTapWithSequentialRelease() throws {
+        let initial = points(4, offset: 0)
+        let firstLift = initial.enumerated().map { index, point in
+            TouchContact(id: Int32(index), state: index == 0 ? .lifted : .moving, x: point.0, y: point.1)
+        }
+        let secondLift = initial.enumerated().map { index, point in
+            TouchContact(id: Int32(index), state: index < 2 ? .lifted : .moving, x: point.0, y: point.1)
+        }
+        let result = replay([
+            frame(0, touching: initial),
+            TouchFrame(timestamp: 0.10, contacts: firstLift),
+            TouchFrame(timestamp: 0.13, contacts: secondLift),
+            frame(0.17, lifted: initial),
+        ])
+        guard case .recognized(.fourFingerTap, _) = result else {
+            throw CheckFailure.failed("Sequential finger release was mistaken for centroid movement")
+        }
+    }
+
+    static func checksPresetOrdering() throws {
+        try require(GestureThresholds.precise.maximumDuration < GestureThresholds.balanced.maximumDuration, "Precise duration must be stricter")
+        try require(GestureThresholds.balanced.maximumDuration < GestureThresholds.responsive.maximumDuration, "Responsive duration must be looser")
+        try require(GestureThresholds.precise.maximumFingerMovement < GestureThresholds.balanced.maximumFingerMovement, "Precise movement must be stricter")
+        try require(GestureThresholds.balanced.maximumFingerMovement < GestureThresholds.responsive.maximumFingerMovement, "Responsive movement must be looser")
     }
 
     static func checksConfigurationRoundTrip() throws {

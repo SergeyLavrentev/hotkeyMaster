@@ -103,6 +103,12 @@ final class AppModel: ObservableObject {
         configurationChanged()
     }
 
+    func setGesturePreset(_ preset: GesturePreset) {
+        configuration.preferences.gesturePreset = preset
+        preferencesChanged()
+        resetGestureCalibration()
+    }
+
     func setLaunchAtLogin(_ enabled: Bool) {
         do {
             try LoginItemManager.setEnabled(enabled)

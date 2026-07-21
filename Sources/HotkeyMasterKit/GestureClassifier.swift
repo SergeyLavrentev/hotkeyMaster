@@ -83,6 +83,7 @@ public final class GestureClassifier {
     private var lastTimestamp: TimeInterval?
     private var centroidStart: (x: Double, y: Double)?
     private var maximumCentroidMovement = 0.0
+    private var peakActiveFingerCount = 0
     private var sawActiveFrame = false
 
     public init(thresholds: GestureThresholds = .balanced, experimentalGesturesEnabled: Bool = false) {
@@ -127,10 +128,15 @@ public final class GestureClassifier {
                 x: activeContacts.map(\.x).reduce(0, +) / Double(activeContacts.count),
                 y: activeContacts.map(\.y).reduce(0, +) / Double(activeContacts.count)
             )
-            if let start = centroidStart {
+            if activeContacts.count > peakActiveFingerCount {
+                // Fingers normally arrive and leave a few milliseconds apart. Measure
+                // movement only while the full, peak-sized contact group is present;
+                // otherwise adding/removing an outer finger looks like a large swipe.
+                peakActiveFingerCount = activeContacts.count
+                centroidStart = activeContacts.count >= 3 || experimentalGesturesEnabled ? centroid : nil
+                maximumCentroidMovement = 0
+            } else if activeContacts.count == peakActiveFingerCount, let start = centroidStart {
                 maximumCentroidMovement = max(maximumCentroidMovement, hypot(centroid.x - start.x, centroid.y - start.y))
-            } else if activeContacts.count >= 3 || experimentalGesturesEnabled {
-                centroidStart = centroid
             }
         }
 
@@ -195,6 +201,7 @@ public final class GestureClassifier {
         lastTimestamp = nil
         centroidStart = nil
         maximumCentroidMovement = 0
+        peakActiveFingerCount = 0
         sawActiveFrame = false
     }
 }
