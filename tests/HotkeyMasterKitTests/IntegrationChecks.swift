@@ -13,6 +13,8 @@ struct HotkeyMasterChecks {
     static func main() throws {
         try recognizesThreeFingerTap()
         try rejectsSwipe()
+        try rejectsShortCoherentSwipeInResponsiveProfile()
+        try acceptsIncoherentTapMovement()
         try rejectsLongPress()
         try rejectsNonSimultaneousFingers()
         try checksExperimentalGestureGate()
@@ -23,7 +25,7 @@ struct HotkeyMasterChecks {
         try checksLegacyImport()
         try checksConflicts()
         try checksBundleIdentifierScopes()
-        print("HotkeyMasterChecks: 12 checks passed")
+        print("HotkeyMasterChecks: 14 checks passed")
     }
 
     static func require(_ condition: @autoclosure () -> Bool, _ message: String) throws {
@@ -49,9 +51,40 @@ struct HotkeyMasterChecks {
         ])
         guard case .rejected(let reason, _) = result else { throw CheckFailure.failed("Swipe was recognized as a tap") }
         switch reason {
-        case .fingerMovedTooFar, .centroidMovedTooFar: break
+        case .fingerMovedTooFar, .centroidMovedTooFar, .coherentSwipe: break
         default: throw CheckFailure.failed("Unexpected swipe rejection reason")
         }
+    }
+
+    static func rejectsShortCoherentSwipeInResponsiveProfile() throws {
+        let classifier = GestureClassifier(thresholds: .responsive)
+        let result = replay([
+            frame(0.00, touching: points(3, offset: 0)),
+            frame(0.08, moving: points(3, offset: 0.045)),
+            frame(0.14, lifted: points(3, offset: 0.045)),
+        ], classifier: classifier)
+        guard case .rejected(.coherentSwipe, let metrics) = result else {
+            throw CheckFailure.failed("Responsive profile accepted a short coherent swipe")
+        }
+        try require((metrics?.directionalCoherence ?? 0) > 0.95, "Coherent swipe direction was not measured")
+    }
+
+    static func acceptsIncoherentTapMovement() throws {
+        let start = points(3, offset: 0)
+        let moved = [
+            (start[0].0 + 0.025, start[0].1),
+            (start[1].0 - 0.020, start[1].1 + 0.015),
+            (start[2].0, start[2].1 - 0.020),
+        ]
+        let result = replay([
+            frame(0.00, touching: start),
+            frame(0.08, moving: moved),
+            frame(0.15, lifted: moved),
+        ], classifier: GestureClassifier(thresholds: .responsive))
+        guard case .recognized(.threeFingerTap, let metrics) = result else {
+            throw CheckFailure.failed("Small incoherent tap movement was rejected as a swipe")
+        }
+        try require(metrics.directionalCoherence < 0.5, "Tap jitter looked directionally coherent")
     }
 
     static func rejectsLongPress() throws {

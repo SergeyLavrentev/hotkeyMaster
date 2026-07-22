@@ -33,6 +33,9 @@ struct TrackpadSettingsView: View {
                         Label("Параметры длительности и движения подбираются автоматически.", systemImage: "slider.horizontal.3")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                        Label("Системные свайпы между рабочими столами блокируются независимо от профиля.", systemImage: "rectangle.3.group")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                     .padding(8)
                 }
@@ -107,6 +110,8 @@ struct TrackpadSettingsView: View {
             return "Касание получилось слишком долгим для выбранного профиля."
         case .fingersStartedTooFarApart:
             return "Пальцы коснулись трекпада не одновременно."
+        case .coherentSwipe:
+            return "Распознан свайп. Действие для тапа не будет выполнено."
         case .fingerMovedTooFar, .centroidMovedTooFar:
             return "Это больше похоже на движение. Попробуйте короткий тап или более отзывчивый профиль."
         case .unsupportedFingerCount(let count):

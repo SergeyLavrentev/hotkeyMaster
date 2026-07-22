@@ -37,6 +37,7 @@ public enum GestureRejectionReason: Equatable, Sendable {
     case fingersStartedTooFarApart(actual: TimeInterval, maximum: TimeInterval)
     case fingerMovedTooFar(actual: Double, maximum: Double)
     case centroidMovedTooFar(actual: Double, maximum: Double)
+    case coherentSwipe(distance: Double, coherence: Double)
     case incompleteFrameSequence
 
     public var message: String {
@@ -47,6 +48,7 @@ public enum GestureRejectionReason: Equatable, Sendable {
         case .fingersStartedTooFarApart(let actual, let maximum): return String(format: "Пальцы поставлены не одновременно: %.0f мс, допустимо %.0f мс.", actual * 1000, maximum * 1000)
         case .fingerMovedTooFar(let actual, let maximum): return String(format: "Палец сместился на %.3f, допустимо %.3f.", actual, maximum)
         case .centroidMovedTooFar(let actual, let maximum): return String(format: "Общее движение %.3f, допустимо %.3f — похоже на свайп.", actual, maximum)
+        case .coherentSwipe(let distance, let coherence): return String(format: "Согласованное движение %.3f (%.0f%%) — распознано как свайп.", distance, coherence * 100)
         case .incompleteFrameSequence: return "Недостаточно данных о касании."
         }
     }
@@ -57,6 +59,8 @@ public struct GestureMetrics: Equatable, Sendable {
     public var duration: TimeInterval
     public var maximumFingerMovement: Double
     public var centroidMovement: Double
+    public var coherentMovement: Double
+    public var directionalCoherence: Double
     public var startSpread: TimeInterval
 }
 
@@ -66,6 +70,9 @@ public enum GestureClassification: Equatable, Sendable {
 }
 
 public final class GestureClassifier {
+    private static let coherentSwipeMinimumMovement = 0.035
+    private static let coherentSwipeMinimumCoherence = 0.72
+
     private struct FingerTrace {
         var startTimestamp: TimeInterval
         var startX: Double
@@ -164,6 +171,14 @@ public final class GestureClassifier {
         let count = traces.count
         let duration = max(0, timestamp - start)
         let movements = traces.values.map(\.maximumMovement)
+        let displacements = traces.values.map { (dx: $0.lastX - $0.startX, dy: $0.lastY - $0.startY) }
+        let meanDX = displacements.map(\.dx).reduce(0, +) / Double(displacements.count)
+        let meanDY = displacements.map(\.dy).reduce(0, +) / Double(displacements.count)
+        let coherentMovement = hypot(meanDX, meanDY)
+        let meanIndividualMovement = displacements.map { hypot($0.dx, $0.dy) }.reduce(0, +) / Double(displacements.count)
+        let directionalCoherence = meanIndividualMovement > 0.000_001
+            ? min(1, coherentMovement / meanIndividualMovement)
+            : 0
         let starts = traces.values.map(\.startTimestamp)
         let spread = (starts.max() ?? start) - (starts.min() ?? start)
         let metrics = GestureMetrics(
@@ -171,6 +186,8 @@ public final class GestureClassifier {
             duration: duration,
             maximumFingerMovement: movements.max() ?? 0,
             centroidMovement: maximumCentroidMovement,
+            coherentMovement: coherentMovement,
+            directionalCoherence: directionalCoherence,
             startSpread: spread
         )
         guard let kind = GestureKind(rawValue: count) else {
@@ -184,6 +201,10 @@ public final class GestureClassifier {
         }
         if spread > thresholds.maximumStartSpread {
             return .rejected(.fingersStartedTooFarApart(actual: spread, maximum: thresholds.maximumStartSpread), metrics)
+        }
+        if coherentMovement >= Self.coherentSwipeMinimumMovement,
+           directionalCoherence >= Self.coherentSwipeMinimumCoherence {
+            return .rejected(.coherentSwipe(distance: coherentMovement, coherence: directionalCoherence), metrics)
         }
         if metrics.maximumFingerMovement > thresholds.maximumFingerMovement {
             return .rejected(.fingerMovedTooFar(actual: metrics.maximumFingerMovement, maximum: thresholds.maximumFingerMovement), metrics)

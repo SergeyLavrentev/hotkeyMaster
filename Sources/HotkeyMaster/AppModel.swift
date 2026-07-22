@@ -244,7 +244,15 @@ final class AppModel: ObservableObject {
     }
 
     private static func metricsDescription(_ metrics: GestureMetrics) -> String {
-        String(format: "%d пальца, %.0f мс, движение %.3f, центр %.3f", metrics.fingerCount, metrics.duration * 1000, metrics.maximumFingerMovement, metrics.centroidMovement)
+        String(
+            format: "%d пальца, %.0f мс, движение %.3f, центр %.3f, согласованное %.3f (%.0f%%)",
+            metrics.fingerCount,
+            metrics.duration * 1000,
+            metrics.maximumFingerMovement,
+            metrics.centroidMovement,
+            metrics.coherentMovement,
+            metrics.directionalCoherence * 100
+        )
     }
 
     private static func isPrimaryCalibrationGesture(_ result: GestureClassification) -> Bool {
