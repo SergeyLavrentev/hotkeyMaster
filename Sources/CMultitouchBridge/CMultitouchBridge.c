@@ -54,6 +54,7 @@ struct HMTrackpad {
     MTUnregisterContactFrameCallbackFn unregisterCallback;
     MTDeviceStartFn deviceStart;
     MTDeviceStopFn deviceStop;
+    bool hadActiveContacts;
     bool started;
 };
 
@@ -87,14 +88,17 @@ static void contactFrameCallback(void *device, MTFinger *fingers, size_t count, 
     const size_t inputCount = count > 32 ? 32 : count;
     HMTouchContact contacts[32];
     int32_t outputCount = 0;
+    bool hasActiveContacts = false;
     for (size_t index = 0; index < inputCount; index++) {
         int32_t canonicalState;
         switch (fingers[index].state) {
         case MTTouchStateMakeTouch:
             canonicalState = 1;
+            hasActiveContacts = true;
             break;
         case MTTouchStateTouching:
             canonicalState = 2;
+            hasActiveContacts = true;
             break;
         case MTTouchStateBreakTouch:
             canonicalState = 4;
@@ -109,6 +113,15 @@ static void contactFrameCallback(void *device, MTFinger *fingers, size_t count, 
         contacts[outputCount].y = fingers[index].normalized.pos.y;
         outputCount++;
     }
+
+    // MultitouchSupport can continuously report hover/range frames even when
+    // nobody is touching the trackpad. Do not wake Swift for those idle frames.
+    // Preserve one empty frame after an active sequence so the classifier can
+    // still finish gestures when the driver omits explicit BreakTouch records.
+    const bool shouldDeliver = outputCount > 0 || trackpad->hadActiveContacts;
+    trackpad->hadActiveContacts = hasActiveContacts;
+    if (!shouldDeliver) return;
+
     trackpad->callback(contacts, outputCount, timestamp, trackpad->context);
 }
 
@@ -181,6 +194,7 @@ void HMTrackpadStop(HMTrackpad *trackpad) {
             trackpad->unregisterCallback(device, contactFrameCallback);
         }
     }
+    trackpad->hadActiveContacts = false;
     trackpad->started = false;
     if (activeTrackpad == trackpad) activeTrackpad = NULL;
 }

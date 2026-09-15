@@ -38,16 +38,33 @@ public enum GestureKind: Int, Codable, CaseIterable, Hashable, Sendable, Identif
     case fourFingerTap = 4
     case oneFingerTap = 1
     case twoFingerTap = 2
+    case fourFingerSwipeLeft = 41
+    case fourFingerSwipeRight = 42
+    case fourFingerSwipeDown = 43
+    case fourFingerSwipeUp = 44
 
     public var id: Int { rawValue }
-    public var fingerCount: Int { rawValue }
-    public var isExperimental: Bool { rawValue < 3 }
+    public var fingerCount: Int {
+        switch self {
+        case .oneFingerTap: return 1
+        case .twoFingerTap: return 2
+        case .threeFingerTap: return 3
+        case .fourFingerTap, .fourFingerSwipeLeft, .fourFingerSwipeRight, .fourFingerSwipeDown, .fourFingerSwipeUp: return 4
+        }
+    }
+    public var isExperimental: Bool {
+        self == .oneFingerTap || self == .twoFingerTap
+    }
     public var displayName: String {
         switch self {
         case .oneFingerTap: return "Тап одним пальцем"
         case .twoFingerTap: return "Тап двумя пальцами"
         case .threeFingerTap: return "Тап тремя пальцами"
         case .fourFingerTap: return "Тап четырьмя пальцами"
+        case .fourFingerSwipeLeft: return "Свайп четырьмя пальцами влево"
+        case .fourFingerSwipeRight: return "Свайп четырьмя пальцами вправо"
+        case .fourFingerSwipeDown: return "Свайп четырьмя пальцами сверху вниз"
+        case .fourFingerSwipeUp: return "Свайп четырьмя пальцами снизу вверх"
         }
     }
 }

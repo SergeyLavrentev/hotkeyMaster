@@ -14,6 +14,10 @@ final class AppModel: ObservableObject {
     @Published var calibrationSuccesses = 0
     @Published var calibrationThreeFingerSuccesses = 0
     @Published var calibrationFourFingerSuccesses = 0
+    @Published var calibrationSwipeLeftSuccesses = 0
+    @Published var calibrationSwipeRightSuccesses = 0
+    @Published var calibrationSwipeDownSuccesses = 0
+    @Published var calibrationSwipeUpSuccesses = 0
     @Published var accessibilityGranted = PermissionManager.accessibilityGranted
     @Published var availableApplications: [ApplicationReference] = []
     @Published var migrationWarnings: [String] = []
@@ -53,6 +57,7 @@ final class AppModel: ObservableObject {
                 Task { @MainActor in self?.lastFrame = frame }
             }
         )
+        trackpadMonitor?.setFrameUpdatesEnabled(isCalibratingGestures)
         trackpadMonitor?.start()
         diagnostics.append(.info, category: "Приложение", message: "HotkeyMaster запущен")
     }
@@ -127,6 +132,10 @@ final class AppModel: ObservableObject {
 
     func setGestureCalibrationActive(_ active: Bool) {
         isCalibratingGestures = active
+        trackpadMonitor?.setFrameUpdatesEnabled(active)
+        if !active {
+            lastFrame = TouchFrame(timestamp: 0, contacts: [])
+        }
         if active { resetGestureCalibration() }
     }
 
@@ -135,6 +144,10 @@ final class AppModel: ObservableObject {
         calibrationSuccesses = 0
         calibrationThreeFingerSuccesses = 0
         calibrationFourFingerSuccesses = 0
+        calibrationSwipeLeftSuccesses = 0
+        calibrationSwipeRightSuccesses = 0
+        calibrationSwipeDownSuccesses = 0
+        calibrationSwipeUpSuccesses = 0
         lastClassification = nil
     }
 
@@ -208,6 +221,10 @@ final class AppModel: ObservableObject {
                 calibrationSuccesses += 1
                 if gesture == .threeFingerTap { calibrationThreeFingerSuccesses += 1 }
                 if gesture == .fourFingerTap { calibrationFourFingerSuccesses += 1 }
+                if gesture == .fourFingerSwipeLeft { calibrationSwipeLeftSuccesses += 1 }
+                if gesture == .fourFingerSwipeRight { calibrationSwipeRightSuccesses += 1 }
+                if gesture == .fourFingerSwipeDown { calibrationSwipeDownSuccesses += 1 }
+                if gesture == .fourFingerSwipeUp { calibrationSwipeUpSuccesses += 1 }
                 return
             }
             let now = ProcessInfo.processInfo.systemUptime
@@ -245,20 +262,21 @@ final class AppModel: ObservableObject {
 
     private static func metricsDescription(_ metrics: GestureMetrics) -> String {
         String(
-            format: "%d пальца, %.0f мс, движение %.3f, центр %.3f, согласованное %.3f (%.0f%%)",
+            format: "%d пальца, %.0f мс, движение %.3f, центр %.3f, согласованное %.3f (%.0f%%), разрыв группы %.3f",
             metrics.fingerCount,
             metrics.duration * 1000,
             metrics.maximumFingerMovement,
             metrics.centroidMovement,
             metrics.coherentMovement,
-            metrics.directionalCoherence * 100
+            metrics.directionalCoherence * 100,
+            metrics.maximumFingerClusterGap
         )
     }
 
     private static func isPrimaryCalibrationGesture(_ result: GestureClassification) -> Bool {
         switch result {
         case .recognized(let gesture, _):
-            return gesture == .threeFingerTap || gesture == .fourFingerTap
+            return gesture.fingerCount == 3 || gesture.fingerCount == 4
         case .rejected(_, let metrics):
             return metrics.map { $0.fingerCount == 3 || $0.fingerCount == 4 } ?? false
         }

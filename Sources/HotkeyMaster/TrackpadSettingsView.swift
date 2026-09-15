@@ -23,6 +23,17 @@ struct TrackpadSettingsView: View {
                     Text("Проверьте жест в реальном времени и выберите устойчивый профиль.").foregroundStyle(.secondary)
                 }
                 calibrationCard
+                GroupBox("Поддерживаемые жесты") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("Тап тремя пальцами", systemImage: "hand.tap")
+                        Label("Тап четырьмя пальцами", systemImage: "hand.tap.fill")
+                        Label("Свайп четырьмя пальцами: ←  →  ↓  ↑", systemImage: "arrow.up.and.down.and.arrow.left.and.right")
+                        Text("Назначьте действие для каждого жеста в разделе «Правила».")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(8)
+                }
                 GroupBox("Профиль распознавания") {
                     VStack(alignment: .leading, spacing: 14) {
                         Picker("Профиль", selection: gesturePreset) {
@@ -33,7 +44,7 @@ struct TrackpadSettingsView: View {
                         Label("Параметры длительности и движения подбираются автоматически.", systemImage: "slider.horizontal.3")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        Label("Системные свайпы между рабочими столами блокируются независимо от профиля.", systemImage: "rectangle.3.group")
+                        Label("Чтобы освободить свайп четырьмя пальцами, отключите его системное действие macOS и войдите в учётную запись заново.", systemImage: "rectangle.3.group")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -60,16 +71,29 @@ struct TrackpadSettingsView: View {
                     .frame(width: 270, height: 170)
                 VStack(alignment: .leading, spacing: 10) {
                     Label("Проверка жеста", systemImage: "hand.tap").font(.headline)
-                    Text("Выполните короткий тап тремя или четырьмя пальцами.").foregroundStyle(.secondary)
+                    Text("Выполните тап тремя/четырьмя пальцами или свайп четырьмя пальцами в любом направлении.")
+                        .foregroundStyle(.secondary)
                     if let result = model.lastClassification {
                         classificationView(result)
                     } else {
                         Label("Ожидаю жест…", systemImage: "circle.dotted").foregroundStyle(.secondary)
                     }
                     Spacer()
-                    HStack(spacing: 14) {
-                        calibrationResult("3 пальца", count: model.calibrationThreeFingerSuccesses)
-                        calibrationResult("4 пальца", count: model.calibrationFourFingerSuccesses)
+                    VStack(alignment: .leading, spacing: 7) {
+                        HStack(spacing: 14) {
+                            calibrationResult("Тап 3", count: model.calibrationThreeFingerSuccesses)
+                            calibrationResult("Тап 4", count: model.calibrationFourFingerSuccesses)
+                        }
+                        HStack(spacing: 14) {
+                            calibrationResult("Свайп ←", count: model.calibrationSwipeLeftSuccesses)
+                            calibrationResult("Свайп →", count: model.calibrationSwipeRightSuccesses)
+                        }
+                        HStack(spacing: 14) {
+                            calibrationResult("Свайп ↓", count: model.calibrationSwipeDownSuccesses)
+                            calibrationResult("Свайп ↑", count: model.calibrationSwipeUpSuccesses)
+                        }
+                    }
+                    HStack {
                         Spacer()
                         Button("Начать заново") { model.resetGestureCalibration() }
                             .buttonStyle(.link)
@@ -96,7 +120,7 @@ struct TrackpadSettingsView: View {
         switch result {
         case .recognized(let gesture, _):
             Label(gesture.displayName, systemImage: "checkmark.circle.fill").foregroundStyle(.green).font(.headline)
-            Text("Профиль уверенно распознал этот тап.")
+            Text("Профиль уверенно распознал этот жест.")
                 .font(.callout).foregroundStyle(.secondary)
         case .rejected(let reason, _):
             Label("Жест отклонён", systemImage: "xmark.circle.fill").foregroundStyle(.orange).font(.headline)
@@ -110,6 +134,8 @@ struct TrackpadSettingsView: View {
             return "Касание получилось слишком долгим для выбранного профиля."
         case .fingersStartedTooFarApart:
             return "Пальцы коснулись трекпада не одновременно."
+        case .fingerClusterTooSpreadOut:
+            return "Касания слишком далеко друг от друга. Возможно, трекпад случайно задела ладонь."
         case .coherentSwipe:
             return "Распознан свайп. Действие для тапа не будет выполнено."
         case .fingerMovedTooFar, .centroidMovedTooFar:

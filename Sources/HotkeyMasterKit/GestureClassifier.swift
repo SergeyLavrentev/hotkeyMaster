@@ -35,6 +35,7 @@ public enum GestureRejectionReason: Equatable, Sendable {
     case experimentalGestureDisabled(Int)
     case tooLong(actual: TimeInterval, maximum: TimeInterval)
     case fingersStartedTooFarApart(actual: TimeInterval, maximum: TimeInterval)
+    case fingerClusterTooSpreadOut(actual: Double, maximum: Double)
     case fingerMovedTooFar(actual: Double, maximum: Double)
     case centroidMovedTooFar(actual: Double, maximum: Double)
     case coherentSwipe(distance: Double, coherence: Double)
@@ -46,6 +47,7 @@ public enum GestureRejectionReason: Equatable, Sendable {
         case .experimentalGestureDisabled(let count): return "Жест \(count) пальцами отключён как экспериментальный."
         case .tooLong(let actual, let maximum): return String(format: "Слишком долго: %.0f мс, допустимо %.0f мс.", actual * 1000, maximum * 1000)
         case .fingersStartedTooFarApart(let actual, let maximum): return String(format: "Пальцы поставлены не одновременно: %.0f мс, допустимо %.0f мс.", actual * 1000, maximum * 1000)
+        case .fingerClusterTooSpreadOut(let actual, let maximum): return String(format: "Касания не образуют компактную группу: разрыв %.3f, допустимо %.3f.", actual, maximum)
         case .fingerMovedTooFar(let actual, let maximum): return String(format: "Палец сместился на %.3f, допустимо %.3f.", actual, maximum)
         case .centroidMovedTooFar(let actual, let maximum): return String(format: "Общее движение %.3f, допустимо %.3f — похоже на свайп.", actual, maximum)
         case .coherentSwipe(let distance, let coherence): return String(format: "Согласованное движение %.3f (%.0f%%) — распознано как свайп.", distance, coherence * 100)
@@ -62,6 +64,7 @@ public struct GestureMetrics: Equatable, Sendable {
     public var coherentMovement: Double
     public var directionalCoherence: Double
     public var startSpread: TimeInterval
+    public var maximumFingerClusterGap: Double
 }
 
 public enum GestureClassification: Equatable, Sendable {
@@ -72,6 +75,14 @@ public enum GestureClassification: Equatable, Sendable {
 public final class GestureClassifier {
     private static let coherentSwipeMinimumMovement = 0.035
     private static let coherentSwipeMinimumCoherence = 0.72
+    private static let recognizedSwipeMinimumMovement = 0.055
+    private static let recognizedSwipeDirectionDominance = 1.25
+    private static let recognizedSwipeMaximumDuration: TimeInterval = 1.2
+    // Normalized trackpad coordinates. This is the largest edge needed to
+    // connect the starting contacts into one group, not the group's full span.
+    // Thus four adjacent fingers may span much more than this value, while a
+    // remote palm contact still creates one conspicuously long edge.
+    private static let maximumFingerClusterGap = 0.30
 
     private struct FingerTrace {
         var startTimestamp: TimeInterval
@@ -181,6 +192,9 @@ public final class GestureClassifier {
             : 0
         let starts = traces.values.map(\.startTimestamp)
         let spread = (starts.max() ?? start) - (starts.min() ?? start)
+        let clusterGap = Self.maximumClusterGap(
+            for: traces.values.map { (x: $0.startX, y: $0.startY) }
+        )
         let metrics = GestureMetrics(
             fingerCount: count,
             duration: duration,
@@ -188,8 +202,35 @@ public final class GestureClassifier {
             centroidMovement: maximumCentroidMovement,
             coherentMovement: coherentMovement,
             directionalCoherence: directionalCoherence,
-            startSpread: spread
+            startSpread: spread,
+            maximumFingerClusterGap: clusterGap
         )
+        if spread > thresholds.maximumStartSpread {
+            return .rejected(.fingersStartedTooFarApart(actual: spread, maximum: thresholds.maximumStartSpread), metrics)
+        }
+        if count >= 3, clusterGap > Self.maximumFingerClusterGap {
+            return .rejected(.fingerClusterTooSpreadOut(actual: clusterGap, maximum: Self.maximumFingerClusterGap), metrics)
+        }
+        let isCoherentFourFingerSwipe = directionalCoherence >= Self.coherentSwipeMinimumCoherence
+        let isHorizontalSwipe =
+            abs(meanDX) >= Self.recognizedSwipeMinimumMovement &&
+            abs(meanDX) >= abs(meanDY) * Self.recognizedSwipeDirectionDominance
+        let isVerticalSwipe =
+            abs(meanDY) >= Self.recognizedSwipeMinimumMovement &&
+            abs(meanDY) >= abs(meanDX) * Self.recognizedSwipeDirectionDominance
+        if count == 4, isCoherentFourFingerSwipe && (isHorizontalSwipe || isVerticalSwipe) {
+            guard duration <= Self.recognizedSwipeMaximumDuration else {
+                return .rejected(.tooLong(actual: duration, maximum: Self.recognizedSwipeMaximumDuration), metrics)
+            }
+            let kind: GestureKind
+            if isHorizontalSwipe {
+                kind = meanDX < 0 ? .fourFingerSwipeLeft : .fourFingerSwipeRight
+            } else {
+                // MultitouchSupport normalizes Y from the lower edge of the trackpad.
+                kind = meanDY < 0 ? .fourFingerSwipeDown : .fourFingerSwipeUp
+            }
+            return .recognized(kind, metrics)
+        }
         guard let kind = GestureKind(rawValue: count) else {
             return .rejected(.unsupportedFingerCount(count), metrics)
         }
@@ -198,9 +239,6 @@ public final class GestureClassifier {
         }
         if duration > thresholds.maximumDuration {
             return .rejected(.tooLong(actual: duration, maximum: thresholds.maximumDuration), metrics)
-        }
-        if spread > thresholds.maximumStartSpread {
-            return .rejected(.fingersStartedTooFarApart(actual: spread, maximum: thresholds.maximumStartSpread), metrics)
         }
         if coherentMovement >= Self.coherentSwipeMinimumMovement,
            directionalCoherence >= Self.coherentSwipeMinimumCoherence {
@@ -213,6 +251,33 @@ public final class GestureClassifier {
             return .rejected(.centroidMovedTooFar(actual: metrics.centroidMovement, maximum: thresholds.maximumCentroidMovement), metrics)
         }
         return .recognized(kind, metrics)
+    }
+
+    private static func maximumClusterGap(for points: [(x: Double, y: Double)]) -> Double {
+        guard points.count > 1 else { return 0 }
+
+        var connected: Set<Int> = [0]
+        var maximumGap = 0.0
+        while connected.count < points.count {
+            var nearestIndex: Int?
+            var nearestDistance = Double.greatestFiniteMagnitude
+            for sourceIndex in connected {
+                for candidateIndex in points.indices where !connected.contains(candidateIndex) {
+                    let distance = hypot(
+                        points[candidateIndex].x - points[sourceIndex].x,
+                        points[candidateIndex].y - points[sourceIndex].y
+                    )
+                    if distance < nearestDistance {
+                        nearestDistance = distance
+                        nearestIndex = candidateIndex
+                    }
+                }
+            }
+            guard let nearestIndex else { break }
+            connected.insert(nearestIndex)
+            maximumGap = max(maximumGap, nearestDistance)
+        }
+        return maximumGap
     }
 
     private func reset() {

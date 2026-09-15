@@ -13,10 +13,14 @@ struct HotkeyMasterChecks {
     static func main() throws {
         try recognizesThreeFingerTap()
         try rejectsSwipe()
+        try recognizesFourFingerHorizontalSwipes()
+        try recognizesFourFingerVerticalSwipes()
         try rejectsShortCoherentSwipeInResponsiveProfile()
         try acceptsIncoherentTapMovement()
         try rejectsLongPress()
         try rejectsNonSimultaneousFingers()
+        try rejectsRemoteThirdContact()
+        try rejectsSeparatedContactClusters()
         try checksExperimentalGestureGate()
         try checksGestureIsolation()
         try recognizesFourFingerTapWithSequentialRelease()
@@ -25,7 +29,7 @@ struct HotkeyMasterChecks {
         try checksLegacyImport()
         try checksConflicts()
         try checksBundleIdentifierScopes()
-        print("HotkeyMasterChecks: 14 checks passed")
+        print("HotkeyMasterChecks: 18 checks passed")
     }
 
     static func require(_ condition: @autoclosure () -> Bool, _ message: String) throws {
@@ -53,6 +57,53 @@ struct HotkeyMasterChecks {
         switch reason {
         case .fingerMovedTooFar, .centroidMovedTooFar, .coherentSwipe: break
         default: throw CheckFailure.failed("Unexpected swipe rejection reason")
+        }
+    }
+
+    static func recognizesFourFingerHorizontalSwipes() throws {
+        let start = points(4, offset: 0)
+        let movedRight = start.map { ($0.0 + 0.09, $0.1 + 0.01) }
+        let right = replay([
+            frame(0.00, touching: start),
+            frame(0.20, moving: movedRight),
+            frame(0.45, lifted: movedRight),
+        ])
+        guard case .recognized(.fourFingerSwipeRight, let rightMetrics) = right else {
+            throw CheckFailure.failed("Four-finger right swipe was not recognized")
+        }
+        try require(rightMetrics.coherentMovement > 0.08, "Right swipe movement was not measured")
+
+        let movedLeft = start.map { ($0.0 - 0.09, $0.1 - 0.005) }
+        let left = replay([
+            frame(1.00, touching: start),
+            frame(1.18, moving: movedLeft),
+            frame(1.40, lifted: movedLeft),
+        ])
+        guard case .recognized(.fourFingerSwipeLeft, _) = left else {
+            throw CheckFailure.failed("Four-finger left swipe was not recognized")
+        }
+    }
+
+    static func recognizesFourFingerVerticalSwipes() throws {
+        let start = points(4, offset: 0)
+        let movedUp = start.map { ($0.0 + 0.01, $0.1 + 0.09) }
+        let up = replay([
+            frame(0.00, touching: start),
+            frame(0.20, moving: movedUp),
+            frame(0.40, lifted: movedUp),
+        ])
+        guard case .recognized(.fourFingerSwipeUp, _) = up else {
+            throw CheckFailure.failed("Four-finger swipe up was not recognized")
+        }
+
+        let movedDown = start.map { ($0.0 - 0.01, $0.1 - 0.09) }
+        let down = replay([
+            frame(1.00, touching: start),
+            frame(1.20, moving: movedDown),
+            frame(1.40, lifted: movedDown),
+        ])
+        guard case .recognized(.fourFingerSwipeDown, _) = down else {
+            throw CheckFailure.failed("Four-finger swipe down was not recognized")
         }
     }
 
@@ -103,6 +154,29 @@ struct HotkeyMasterChecks {
             frame(0.22, lifted: points(3, offset: 0)),
         ])
         guard case .rejected(.fingersStartedTooFarApart, _) = result else { throw CheckFailure.failed("Sequential fingers were not rejected") }
+    }
+
+    static func rejectsRemoteThirdContact() throws {
+        let contacts = [(0.34, 0.55), (0.47, 0.54), (0.92, 0.10)]
+        let result = replay([
+            frame(0.00, touching: contacts),
+            frame(0.12, lifted: contacts),
+        ])
+        guard case .rejected(.fingerClusterTooSpreadOut, let metrics) = result else {
+            throw CheckFailure.failed("A two-finger tap plus a remote palm contact was recognized as a three-finger tap")
+        }
+        try require((metrics?.maximumFingerClusterGap ?? 0) > 0.30, "Remote contact gap was not measured")
+    }
+
+    static func rejectsSeparatedContactClusters() throws {
+        let contacts = [(0.10, 0.70), (0.21, 0.69), (0.76, 0.24), (0.87, 0.25)]
+        let result = replay([
+            frame(0.00, touching: contacts),
+            frame(0.12, lifted: contacts),
+        ])
+        guard case .rejected(.fingerClusterTooSpreadOut, _) = result else {
+            throw CheckFailure.failed("Two separated pairs were recognized as a four-finger tap")
+        }
     }
 
     static func checksExperimentalGestureGate() throws {

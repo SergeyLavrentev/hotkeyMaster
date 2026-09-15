@@ -1,16 +1,16 @@
 # HotkeyMaster 2
 
 HotkeyMaster is a native macOS menu-bar application for global keyboard
-shortcuts and three-/four-finger trackpad taps. Version 2 is a greenfield Swift
-rewrite; the Python/PyQt implementation in the repository is legacy code and is
-not used by the native application.
+shortcuts, three-/four-finger trackpad taps, and four-finger swipes.
+Version 2 is a greenfield Swift rewrite; the Python/PyQt implementation in the
+repository is legacy code and is not used by the native application.
 
 ## Features
 
 - Native SwiftUI settings and `MenuBarExtra` UI.
 - Typed rules: trigger → action → exact application scope.
 - Global keyboard monitoring through a CoreGraphics event tap.
-- Three- and four-finger taps with deterministic swipe/long-press filtering.
+- Three- and four-finger taps plus four-finger directional swipes.
 - Live touch visualization and a clear rejection reason for every tested gesture.
 - Precise, Balanced, Responsive, and Custom gesture profiles applied immediately.
 - Actions for URLs, applications, commands, key presses, and display brightness.
@@ -55,7 +55,7 @@ for the current run; it appears again on the next launch until access is granted
 
 The local Command Line Tools image does not ship `XCTest`/`Testing`, so the
 same deterministic checks are packaged as the `HotkeyMasterChecks` executable.
-A successful run prints `HotkeyMasterChecks: 10 checks passed`.
+A successful run prints `HotkeyMasterChecks: 18 checks passed`.
 
 ## Configuration migration
 

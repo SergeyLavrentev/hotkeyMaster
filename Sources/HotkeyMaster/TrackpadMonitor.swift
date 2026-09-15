@@ -12,6 +12,9 @@ final class TrackpadMonitor {
     private let diagnostics: DiagnosticLog
     private let classificationHandler: ClassificationHandler
     private let frameHandler: FrameHandler
+    private var frameUpdatesEnabled = false
+    private var lastFrameUpdateTimestamp: TimeInterval?
+    private static let frameUpdateInterval: TimeInterval = 1.0 / 20.0
 
     init(
         diagnostics: DiagnosticLog,
@@ -24,6 +27,12 @@ final class TrackpadMonitor {
         self.classifier = GestureClassifier(thresholds: thresholds, experimentalGesturesEnabled: experimentalGestures)
         self.classificationHandler = classificationHandler
         self.frameHandler = frameHandler
+    }
+
+    func setFrameUpdatesEnabled(_ enabled: Bool) {
+        lock.lock(); defer { lock.unlock() }
+        frameUpdatesEnabled = enabled
+        lastFrameUpdateTimestamp = nil
     }
 
     func update(thresholds: GestureThresholds, experimentalGestures: Bool) {
@@ -71,10 +80,18 @@ final class TrackpadMonitor {
             values = []
         }
         let frame = TouchFrame(timestamp: timestamp, contacts: values)
-        frameHandler(frame)
         lock.lock()
         let result = classifier.process(frame)
+        let isSequenceEnding = values.isEmpty || values.allSatisfy { $0.state == .lifted }
+        let shouldPublishFrame = frameUpdatesEnabled && (
+            isSequenceEnding ||
+            lastFrameUpdateTimestamp.map { timestamp - $0 >= Self.frameUpdateInterval } ?? true
+        )
+        if shouldPublishFrame {
+            lastFrameUpdateTimestamp = timestamp
+        }
         lock.unlock()
+        if shouldPublishFrame { frameHandler(frame) }
         if let result { classificationHandler(result) }
     }
 

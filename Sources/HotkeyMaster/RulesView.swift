@@ -62,7 +62,13 @@ struct RulesView: View {
             }
         }
         .sheet(item: $editor) { item in
-            RuleEditorView(rule: item.rule, allRules: model.configuration.rules) { model.updateRule($0) }
+            RuleEditorView(rule: item.rule, allRules: model.configuration.rules) { savedRule in
+                if model.configuration.rules.contains(where: { $0.id == savedRule.id }) {
+                    model.updateRule(savedRule)
+                } else {
+                    model.addRule(savedRule)
+                }
+            }
                 .environmentObject(model)
         }
     }
@@ -79,6 +85,19 @@ struct RulesView: View {
                     Button("Сочетание клавиш", systemImage: "keyboard") { createKeyboardRule() }
                     Button("Тап тремя пальцами", systemImage: "hand.tap") { createGestureRule(.threeFingerTap) }
                     Button("Тап четырьмя пальцами", systemImage: "hand.tap.fill") { createGestureRule(.fourFingerTap) }
+                    Divider()
+                    Button("Свайп четырьмя пальцами влево", systemImage: "arrow.left") {
+                        createGestureRule(.fourFingerSwipeLeft)
+                    }
+                    Button("Свайп четырьмя пальцами вправо", systemImage: "arrow.right") {
+                        createGestureRule(.fourFingerSwipeRight)
+                    }
+                    Button("Свайп четырьмя пальцами сверху вниз", systemImage: "arrow.down") {
+                        createGestureRule(.fourFingerSwipeDown)
+                    }
+                    Button("Свайп четырьмя пальцами снизу вверх", systemImage: "arrow.up") {
+                        createGestureRule(.fourFingerSwipeUp)
+                    }
                 } label: { Label("Добавить", systemImage: "plus") }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
@@ -96,12 +115,12 @@ struct RulesView: View {
 
     private func createKeyboardRule() {
         let rule = Rule(trigger: .keyboard(KeyCombination(virtualKey: 49, modifiers: [.command], keyLabel: "Space")), action: .openURL("https://"))
-        model.addRule(rule); editor = EditableRule(rule: rule)
+        editor = EditableRule(rule: rule)
     }
 
     private func createGestureRule(_ gesture: GestureKind) {
         let rule = Rule(trigger: .gesture(gesture), action: .pressKeys(KeyCombination(virtualKey: 17, modifiers: [.command], keyLabel: "T")))
-        model.addRule(rule); editor = EditableRule(rule: rule)
+        editor = EditableRule(rule: rule)
     }
 }
 
@@ -154,6 +173,10 @@ private struct RuleRow: View {
 
     private var triggerIcon: String {
         if case .keyboard = rule.trigger { return "keyboard" }
+        if case .gesture(.fourFingerSwipeLeft) = rule.trigger { return "arrow.left.circle" }
+        if case .gesture(.fourFingerSwipeRight) = rule.trigger { return "arrow.right.circle" }
+        if case .gesture(.fourFingerSwipeDown) = rule.trigger { return "arrow.down.circle" }
+        if case .gesture(.fourFingerSwipeUp) = rule.trigger { return "arrow.up.circle" }
         return "hand.tap"
     }
 }

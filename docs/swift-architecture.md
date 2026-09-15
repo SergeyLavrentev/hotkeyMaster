@@ -48,6 +48,8 @@ input format for first-launch migration.
 ## Gesture invariants
 
 - Three- and four-finger taps are supported by default.
+- Four-finger swipes are exposed as distinct left/right/up/down triggers;
+  three-finger swipes remain rejected.
 - One- and two-finger taps require the explicit experimental preference.
 - Duration, per-finger displacement, centroid displacement, and finger start
   spread are evaluated independently and produce a user-facing rejection
