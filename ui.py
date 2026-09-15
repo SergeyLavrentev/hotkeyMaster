@@ -130,8 +130,10 @@ class SettingsWindow(QtWidgets.QDialog):
         self._help_texts = {
             'autostart': 'Запускать HotkeyMaster автоматически после входа в систему.\nОтключите, если хотите запускать программу вручную.',
             'strict': 'Когда включено — хоткей сработает только если НЕТ лишних модификаторов.\nНапример, настроено Cmd+K: при включённой опции Cmd+Alt+K уже НЕ сработает.\nКогда выключено — допускаются дополнительные модификаторы (Cmd+Alt+K тоже сработает).',
-            'debounce': 'Минимальная пауза между двумя одинаковыми жестами, чтобы они засчитались как отдельные срабатывания.',
-            'release_gap': 'Минимальный интервал между последовательными тапами внутри одного жеста.\nУвеличьте, если жесты иногда склеиваются; уменьшите — если жест не распознаётся из-за слишком быстрых тапов.'
+            'tap_sensitivity': 'Насколько легко распознаётся тап.\nМягче — легче распознать, но больше ложных срабатываний.\nСтроже — меньше ложных срабатываний, но может быть сложнее попасть в тап.',
+            'swipe_filter': 'Сила защиты от системных свайпов (рабочие столы, Mission Control).\nСильнее — реже ложные тапы при свайпе.',
+            'repeat_speed': 'Скорость повторного срабатывания одного и того же жеста.\nБыстрее — меньше пауза между повторами.',
+            'release_gap': 'Минимальный разрыв между последовательными тапами внутри одного жеста.\nДлиннее — меньше склеиваний, но медленнее быстрые серии.'
         }
 
         def _format_tooltip(text: str) -> str:
@@ -169,8 +171,27 @@ class SettingsWindow(QtWidgets.QDialog):
 
         self.grp_track = QtWidgets.QGroupBox('Трекпад — глобальные параметры')
         fl = QtWidgets.QFormLayout(self.grp_track)
-        self.sb_debounce = QtWidgets.QDoubleSpinBox(); self.sb_debounce.setRange(0,3); self.sb_debounce.setDecimals(2); self.sb_debounce.setSingleStep(0.05); self.sb_debounce.setValue(0.60)
-        self.sb_release = QtWidgets.QDoubleSpinBox(); self.sb_release.setRange(0,0.5); self.sb_release.setDecimals(3); self.sb_release.setSingleStep(0.01); self.sb_release.setValue(0.02)
+        def _make_slider():
+            s = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+            s.setRange(0, 100)
+            s.setSingleStep(1)
+            s.setPageStep(10)
+            lbl = QtWidgets.QLabel('')
+            lbl.setMinimumWidth(110)
+            cont = QtWidgets.QWidget()
+            h = QtWidgets.QHBoxLayout(cont)
+            h.setContentsMargins(0, 0, 0, 0)
+            h.setSpacing(8)
+            h.addWidget(s, 1)
+            h.addWidget(lbl)
+            return s, lbl, cont
+
+        def _level_label(v, low, mid, high):
+            if v <= 33:
+                return low
+            if v <= 66:
+                return mid
+            return high
         # Обёртка для label + help
         def _label_with_help(text: str, key: str):
             w = QtWidgets.QWidget(); h = QtWidgets.QHBoxLayout(w)
@@ -180,8 +201,37 @@ class SettingsWindow(QtWidgets.QDialog):
             h.addWidget(_make_help_button(key))
             h.addStretch(1)
             return w
-        fl.addRow(_label_with_help('Повтор жеста (сек):', 'debounce'), self.sb_debounce)
-        fl.addRow(_label_with_help('Мин. разрыв тапов (сек):', 'release_gap'), self.sb_release)
+        self.sl_tap_sens, self.lb_tap_sens, w_tap = _make_slider()
+        self.sl_swipe_filter, self.lb_swipe_filter, w_swipe = _make_slider()
+        self.sl_repeat_speed, self.lb_repeat_speed, w_repeat = _make_slider()
+        self.sl_release_gap, self.lb_release_gap, w_gap = _make_slider()
+
+        fl.addRow(_label_with_help('Чувствительность тапа:', 'tap_sensitivity'), w_tap)
+        fl.addRow(_label_with_help('Защита от свайпа:', 'swipe_filter'), w_swipe)
+        fl.addRow(_label_with_help('Скорость повтора жеста:', 'repeat_speed'), w_repeat)
+        fl.addRow(_label_with_help('Пауза между тапами:', 'release_gap'), w_gap)
+
+        def _update_tap_label(v):
+            self.lb_tap_sens.setText(_level_label(v, 'Строго', 'Нормально', 'Мягко'))
+        def _update_swipe_label(v):
+            self.lb_swipe_filter.setText(_level_label(v, 'Слабая', 'Средняя', 'Сильная'))
+        def _update_repeat_label(v):
+            self.lb_repeat_speed.setText(_level_label(v, 'Медленно', 'Нормально', 'Быстро'))
+        def _update_gap_label(v):
+            self.lb_release_gap.setText(_level_label(v, 'Длиннее', 'Нормально', 'Короче'))
+
+        self._update_tap_label = _update_tap_label
+        self._update_swipe_label = _update_swipe_label
+        self._update_repeat_label = _update_repeat_label
+        self._update_gap_label = _update_gap_label
+
+        for s, fn in (
+            (self.sl_tap_sens, _update_tap_label),
+            (self.sl_swipe_filter, _update_swipe_label),
+            (self.sl_repeat_speed, _update_repeat_label),
+            (self.sl_release_gap, _update_gap_label),
+        ):
+            s.valueChanged.connect(fn)
 
         # --- Стек страниц ---
         self._stack_container = QtWidgets.QWidget()
@@ -203,7 +253,7 @@ class SettingsWindow(QtWidgets.QDialog):
         self._load_general(); self._load_win_size(); self._install_size_saver()
 
         # Сигналы сохранения общих настроек
-        for w in (self.cb_autostart, self.cb_strict, self.sb_debounce, self.sb_release):
+        for w in (self.cb_autostart, self.cb_strict, self.sl_tap_sens, self.sl_swipe_filter, self.sl_repeat_speed, self.sl_release_gap):
             if isinstance(w, QtWidgets.QCheckBox):
                 w.stateChanged.connect(self._save_general)
             else:
@@ -474,12 +524,77 @@ class SettingsWindow(QtWidgets.QDialog):
         except Exception: pass
         self.cb_autostart.setChecked(actual)
         self.cb_strict.setChecked(bool(data.get('strict_mod_match',False)))
-        gd=data.get('gesture_debounce'); rg=data.get('gesture_release_gap')
-        if isinstance(gd,(int,float)) and 0<=gd<=3: self.sb_debounce.setValue(float(gd))
-        if isinstance(rg,(int,float)) and 0<=rg<=0.5: self.sb_release.setValue(float(rg))
+
+        def _clamp(v, lo, hi):
+            return max(lo, min(hi, v))
+        def _inv_lerp(a, b, x):
+            if a == b:
+                return 0.0
+            return _clamp((x - a) / (b - a), 0.0, 1.0)
+
+        tap_sens = data.get('tap_sensitivity')
+        swipe_filter = data.get('swipe_filter_strength')
+        repeat_speed = data.get('gesture_repeat_speed')
+        release_gap = data.get('tap_release_gap')
+
+        if not isinstance(tap_sens, (int, float)):
+            tap_sens = 60
+        if not isinstance(swipe_filter, (int, float)):
+            swipe_filter = 70
+        if not isinstance(repeat_speed, (int, float)):
+            # fallback to old numeric debounce
+            gd = data.get('gesture_debounce')
+            if isinstance(gd, (int, float)):
+                repeat_speed = _inv_lerp(1.0, 0.2, float(gd)) * 100.0
+            else:
+                repeat_speed = 50
+        if not isinstance(release_gap, (int, float)):
+            # fallback to old numeric release gap
+            rg = data.get('gesture_release_gap')
+            if isinstance(rg, (int, float)):
+                release_gap = _inv_lerp(0.08, 0.01, float(rg)) * 100.0
+            else:
+                release_gap = 30
+
+        self.sl_tap_sens.setValue(int(_clamp(tap_sens, 0, 100)))
+        self.sl_swipe_filter.setValue(int(_clamp(swipe_filter, 0, 100)))
+        self.sl_repeat_speed.setValue(int(_clamp(repeat_speed, 0, 100)))
+        self.sl_release_gap.setValue(int(_clamp(release_gap, 0, 100)))
+
+        # Обновляем текстовые подписи у ползунков
+        try:
+            self._update_tap_label(self.sl_tap_sens.value())
+            self._update_swipe_label(self.sl_swipe_filter.value())
+            self._update_repeat_label(self.sl_repeat_speed.value())
+            self._update_gap_label(self.sl_release_gap.value())
+        except Exception:
+            pass
 
     def _save_general(self):
-        data={'autostart':self.cb_autostart.isChecked(),'strict_mod_match':self.cb_strict.isChecked(),'gesture_debounce':round(self.sb_debounce.value(),2),'gesture_release_gap':round(self.sb_release.value(),3)}
+        def _lerp(a, b, t):
+            return a + (b - a) * t
+        def _clamp(v, lo, hi):
+            return max(lo, min(hi, v))
+        tap_sens = self.sl_tap_sens.value()
+        swipe_filter = self.sl_swipe_filter.value()
+        repeat_speed = self.sl_repeat_speed.value()
+        release_gap = self.sl_release_gap.value()
+
+        r = _clamp(repeat_speed, 0, 100) / 100.0
+        g = _clamp(release_gap, 0, 100) / 100.0
+        gesture_debounce = _lerp(1.0, 0.2, r)
+        gesture_release_gap = _lerp(0.08, 0.01, g)
+
+        data={
+            'autostart':self.cb_autostart.isChecked(),
+            'strict_mod_match':self.cb_strict.isChecked(),
+            'tap_sensitivity':int(_clamp(tap_sens, 0, 100)),
+            'swipe_filter_strength':int(_clamp(swipe_filter, 0, 100)),
+            'gesture_repeat_speed':int(_clamp(repeat_speed, 0, 100)),
+            'tap_release_gap':int(_clamp(release_gap, 0, 100)),
+            'gesture_debounce':round(gesture_debounce,2),
+            'gesture_release_gap':round(gesture_release_gap,3),
+        }
         try:
             os.makedirs(os.path.dirname(self._settings_path),exist_ok=True)
             with open(self._settings_path,'w',encoding='utf-8') as f: json.dump(data,f,ensure_ascii=False,indent=2)

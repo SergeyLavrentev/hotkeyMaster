@@ -76,13 +76,18 @@ class Finger(ctypes.Structure):
     ]
 
 # --- Trackpad gesture detection logic ---
-MAX_DT = 0.25
-MAX_DPOS = 0.2  # Увеличено с 0.1 до 0.2 для более реалистичного порога движения
-MAX_DPOS_SWIPE = 0.07  # Новый, более строгий порог для анти-свайп фильтра
+DEFAULT_MAX_DT = 0.25
+DEFAULT_MAX_DPOS = 0.2  # Увеличено с 0.1 до 0.2 для более реалистичного порога движения
+DEFAULT_MAX_DPOS_SWIPE = 0.07  # Новый, более строгий порог для анти-свайп фильтра
 SWIPE_TRAJ_WINDOW = 7  # Окно анализа траектории (кадров)
-MAX_SWIPE_SPEED = 1.2  # Максимальная скорость (норм.ед./сек) для тапа
-SYNC_ANGLE_THRESHOLD = 20  # градусы, допустимое расхождение направлений
-GESTURE_RELEASE_GAP = 0.02  # минимальная пауза (сек) пустого трекпада (ускорено для быстрого повторного тапа)
+DEFAULT_MAX_SWIPE_SPEED = 1.2  # Максимальная скорость (норм.ед./сек) для тапа
+DEFAULT_SYNC_ANGLE_THRESHOLD = 20  # градусы, допустимое расхождение направлений
+DEFAULT_GESTURE_RELEASE_GAP = 0.02  # минимальная пауза (сек) пустого трекпада (ускорено для быстрого повторного тапа)
+DEFAULT_HISTORY_MAX_SEC = 0.25  # сколько хранить историю позиций (сек)
+DEFAULT_TAP_MAX_CENTROID_PATH = 0.04  # максимум суммарного пути центроида для тапа
+DEFAULT_TAP_MAX_CENTROID_NET = 0.03  # максимум смещения центроида для тапа
+DEFAULT_TAP_MAX_CENTROID_SPEED = 0.6  # максимум скорости центроида для тапа (норм.ед./сек)
+MIN_CENTROID_SAMPLES = 2  # минимум точек центроида для уверенной проверки
 
 class TrackpadGestureEngine:
     def __init__(self, get_gesture_actions, run_action_func, get_active_app_name_func=None):
@@ -98,6 +103,8 @@ class TrackpadGestureEngine:
             self._last_down = {}            # fid -> (x0,y0) для расчёта смещения
             self._max_move = {}             # fid -> max distance
             self._finger_history = []       # [(ts, {fid:(x,y)})] для анти-свайп анализа
+            self._centroid_history = []     # [(ts, count, (cx,cy))] для анализа движений
+            self._last_pos = {}             # fid -> (x,y,ts) последняя позиция
 
             # Тайминги
             self.start_ts = None
@@ -112,7 +119,17 @@ class TrackpadGestureEngine:
             self._empty_since = None
             self._last_frame_ids = set()
             # Возможная переопределяемая пауза освобождения
-            self._release_gap = GESTURE_RELEASE_GAP
+            self._release_gap = DEFAULT_GESTURE_RELEASE_GAP
+            # Пороговые значения (могут переопределяться настройками)
+            self._max_dt = DEFAULT_MAX_DT
+            self._max_dpos = DEFAULT_MAX_DPOS
+            self._max_dpos_swipe = DEFAULT_MAX_DPOS_SWIPE
+            self._max_swipe_speed = DEFAULT_MAX_SWIPE_SPEED
+            self._sync_angle_threshold = DEFAULT_SYNC_ANGLE_THRESHOLD
+            self._history_max_sec = DEFAULT_HISTORY_MAX_SEC
+            self._tap_max_centroid_path = DEFAULT_TAP_MAX_CENTROID_PATH
+            self._tap_max_centroid_net = DEFAULT_TAP_MAX_CENTROID_NET
+            self._tap_max_centroid_speed = DEFAULT_TAP_MAX_CENTROID_SPEED
             self._load_gesture_settings()
 
             # Общие служебные поля
@@ -310,11 +327,24 @@ class TrackpadGestureEngine:
             for i in range(count):
                 f = fingers[i]
                 snapshot[f.identifier] = (f.norm.pos.x, f.norm.pos.y)
+                self._last_pos[f.identifier] = (f.norm.pos.x, f.norm.pos.y, ts)
             # Добавляем (timestamp, snapshot)
             self._finger_history.append((ts, snapshot))
             # Обрезаем окно по длине и времени
+            cutoff = ts - self._history_max_sec
+            if cutoff > 0:
+                self._finger_history = [(t, fr) for t, fr in self._finger_history if t >= cutoff]
             if len(self._finger_history) > SWIPE_TRAJ_WINDOW * 3:
                 self._finger_history = self._finger_history[-SWIPE_TRAJ_WINDOW:]
+            # История центроида для оценки общего движения
+            if count > 0:
+                cx = sum(pos[0] for pos in snapshot.values()) / count
+                cy = sum(pos[1] for pos in snapshot.values()) / count
+                self._centroid_history.append((ts, count, (cx, cy)))
+                if cutoff > 0:
+                    self._centroid_history = [(t, c, xy) for t, c, xy in self._centroid_history if t >= cutoff]
+                if len(self._centroid_history) > SWIPE_TRAJ_WINDOW * 3:
+                    self._centroid_history = self._centroid_history[-SWIPE_TRAJ_WINDOW:]
         except Exception:
             pass
         # 1. Обновляем карту активных пальцев и сохраняем DOWN-координаты и максимальное смещение
@@ -364,7 +394,10 @@ class TrackpadGestureEngine:
             self._last_activity_ts = time.time()
             if fid in self._last_down:
                 x0, y0 = self._last_down[fid]
-                current_x, current_y = x0, y0
+                if fid in self._last_pos:
+                    current_x, current_y, _ = self._last_pos[fid]
+                else:
+                    current_x, current_y = x0, y0
                 dx = abs(current_x - x0)
                 dy = abs(current_y - y0)
                 dist = (dx ** 2 + dy ** 2) ** 0.5
@@ -380,8 +413,24 @@ class TrackpadGestureEngine:
             nfingers = len(self._gesture_fingers)
             gesture_name = None
             max_moves = [self._max_move.get(fid, 0.0) for fid in self._gesture_fingers]
-            is_tap = all(mv <= MAX_DPOS for mv in max_moves)
-            if duration <= MAX_DT and is_tap:
+            is_tap = all(mv <= self._max_dpos for mv in max_moves)
+            # Доп. фильтр против свайпа: анализ движения центроида
+            centroid_points = [(t, xy) for t, c, xy in self._centroid_history if c == nfingers]
+            centroid_ok = True
+            if len(centroid_points) >= MIN_CENTROID_SAMPLES:
+                (t0, (x0, y0)) = centroid_points[0]
+                (t1, (x1, y1)) = centroid_points[-1]
+                dt = t1 - t0 if t1 > t0 else 1e-6
+                net = ((x1 - x0) ** 2 + (y1 - y0) ** 2) ** 0.5
+                path = 0.0
+                for i in range(1, len(centroid_points)):
+                    (ta, (xa, ya)) = centroid_points[i - 1]
+                    (tb, (xb, yb)) = centroid_points[i]
+                    path += ((xb - xa) ** 2 + (yb - ya) ** 2) ** 0.5
+                speed = path / dt
+                if net > self._tap_max_centroid_net or path > self._tap_max_centroid_path or speed > self._tap_max_centroid_speed:
+                    centroid_ok = False
+            if duration <= self._max_dt and is_tap and centroid_ok:
                 if nfingers == 1:
                     gesture_name = 'Тап одним пальцем'
                 elif nfingers == 2:
@@ -404,6 +453,10 @@ class TrackpadGestureEngine:
         now = time.time()
         debounce_time = 0.3
         if only_ups and count in (3, 4) and not self._active and not self._gesture_fingers:
+            # Если нет достаточной истории центроида — считаем событие неоднозначным и не распознаём тап
+            centroid_points = [(t, xy) for t, c, xy in self._centroid_history if c == count]
+            if len(centroid_points) < MIN_CENTROID_SAMPLES:
+                return
             positions = [(f.norm.pos.x, f.norm.pos.y) for f in fingers[:count]]
             max_dist = 0.0
             for i in range(len(positions)):
@@ -431,7 +484,7 @@ class TrackpadGestureEngine:
                         import math
                         angle = math.degrees(math.atan2(y1 - y0, x1 - x0))
                         directions.append(angle)
-                    if dtraj > MAX_DPOS_SWIPE:
+                    if dtraj > self._max_dpos_swipe:
                         moved_too_much = True
                         break
             # Проверка синхронности направления (характерно для свайпа)
@@ -439,11 +492,23 @@ class TrackpadGestureEngine:
             if len(directions) >= 2:
                 min_angle = min(directions)
                 max_angle = max(directions)
-                if abs(max_angle - min_angle) < SYNC_ANGLE_THRESHOLD:
+                if abs(max_angle - min_angle) < self._sync_angle_threshold:
                     sync = True
             # Проверка скорости
-            fast = any(s > MAX_SWIPE_SPEED for s in speeds)
-            if max_dist > MAX_DPOS_SWIPE or moved_too_much or sync or fast:
+            fast = any(s > self._max_swipe_speed for s in speeds)
+            # Движение центроида (характерно для свайпа рабочих столов)
+            (t0, (x0, y0)) = centroid_points[0]
+            (t1, (x1, y1)) = centroid_points[-1]
+            dt = t1 - t0 if t1 > t0 else 1e-6
+            net = ((x1 - x0) ** 2 + (y1 - y0) ** 2) ** 0.5
+            path = 0.0
+            for i in range(1, len(centroid_points)):
+                (ta, (xa, ya)) = centroid_points[i - 1]
+                (tb, (xb, yb)) = centroid_points[i]
+                path += ((xb - xa) ** 2 + (yb - ya) ** 2) ** 0.5
+            centroid_fast = (path / dt) > self._tap_max_centroid_speed
+            centroid_far = net > self._tap_max_centroid_net or path > self._tap_max_centroid_path
+            if max_dist > self._max_dpos_swipe or moved_too_much or sync or fast or centroid_fast or centroid_far:
                 logger.debug(f"[PHANTOM] filtered: max_dist={max_dist:.3f}, moved_too_much={moved_too_much}, sync={sync}, fast={fast}, speeds={speeds}")
                 return
             if (
@@ -526,7 +591,11 @@ class TrackpadGestureEngine:
         """Пытаемся загрузить gesture настройки из settings.json (не критично). Формат:
         {
           "gesture_debounce": 0.5,
-          "gesture_release_gap": 0.03
+          "gesture_release_gap": 0.03,
+          "tap_sensitivity": 60,
+          "swipe_filter_strength": 70,
+          "gesture_repeat_speed": 50,
+          "tap_release_gap": 30
         }
         """
         try:
@@ -539,6 +608,39 @@ class TrackpadGestureEngine:
             if not hasattr(self, '_settings_mtime') or self._settings_mtime != st.st_mtime:
                 with open(settings_path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
+                def _clamp(v, lo, hi):
+                    return max(lo, min(hi, v))
+                def _lerp(a, b, t):
+                    return a + (b - a) * t
+
+                # --- User-friendly sliders ---
+                tap_sens = data.get('tap_sensitivity')
+                if isinstance(tap_sens, (int, float)):
+                    t = _clamp(float(tap_sens), 0, 100) / 100.0
+                    self._max_dt = _lerp(0.18, 0.32, t)
+                    self._max_dpos = _lerp(0.06, 0.24, t)
+                    self._tap_max_centroid_path = _lerp(0.02, 0.06, t)
+                    self._tap_max_centroid_net = _lerp(0.015, 0.04, t)
+                    self._tap_max_centroid_speed = _lerp(0.35, 0.8, t)
+
+                swipe_strength = data.get('swipe_filter_strength')
+                if isinstance(swipe_strength, (int, float)):
+                    s = _clamp(float(swipe_strength), 0, 100) / 100.0
+                    self._max_dpos_swipe = _lerp(0.10, 0.045, s)
+                    self._max_swipe_speed = _lerp(1.6, 0.8, s)
+                    self._sync_angle_threshold = _lerp(30, 15, s)
+
+                repeat_speed = data.get('gesture_repeat_speed')
+                if isinstance(repeat_speed, (int, float)):
+                    r = _clamp(float(repeat_speed), 0, 100) / 100.0
+                    self._gesture_debounce = _lerp(1.0, 0.2, r)
+
+                release_gap = data.get('tap_release_gap')
+                if isinstance(release_gap, (int, float)):
+                    g = _clamp(float(release_gap), 0, 100) / 100.0
+                    self._release_gap = _lerp(0.08, 0.01, g)
+
+                # --- Backward-compatible low-level overrides ---
                 gd = data.get('gesture_debounce')
                 if isinstance(gd, (int, float)) and gd >= 0:
                     self._gesture_debounce = float(gd)
